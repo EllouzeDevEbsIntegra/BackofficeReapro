@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="fr" xmlns:th="http://www.w3.org/1999/xhtml">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { background: #f5f7fb; font-family: Roboto, sans-serif; }
+        .container {
+            max-width: 600px; margin: 30px auto; padding: 30px;
+            background: #fff; border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.07);
+        }
+        h1 { color: #333; font-size: 22px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Compte activé</h1>
+
+    <p>Bonjour <b th:text="${name}"></b>,</p>
+    <p>Votre compte a été créé et activé avec succès.</p>
+
+    <p style="font-size:14px; text-align:center; color:#999;">
+        support technique
+    </p>
+</div>
+
+</body>
+</html>

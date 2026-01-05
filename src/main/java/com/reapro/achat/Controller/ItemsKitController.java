@@ -1,0 +1,30 @@
+package com.reapro.achat.Controller;
+
+import com.reapro.achat.DTO.BcItemEnrichedResponse;
+import com.reapro.achat.DTO.PagedResponse;
+import com.reapro.achat.services.ItemsKitService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/itemsKit")
+@RequiredArgsConstructor
+public class ItemsKitController {
+
+    private final ItemsKitService service;
+
+    /**
+     * Exemple:
+     * GET /api/itemsKit?no=39613&page=0&size=20
+     */
+    @GetMapping
+    public PagedResponse<BcItemEnrichedResponse> getItemsKit(
+            @AuthenticationPrincipal String email,
+            @RequestParam String no,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size
+    ) {
+        return service.getItemsKit(email, no, page, size);
+    }
+}

@@ -1,0 +1,178 @@
+package com.reapro.achat.services;
+
+import com.reapro.achat.exceptions.ApiException;
+import com.reapro.achat.exceptions.ErrorCode;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.function.client.WebClient;
+
+import java.time.Duration;
+import java.util.Map;
+
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class BusinessCentralService {
+
+    private final WebClient.Builder webClientBuilder;
+    private final ParameterService parameterService;
+
+    // ─────────────────────────────────────────────────────────────
+    // Configuration du WebClient
+    // ─────────────────────────────────────────────────────────────
+    private WebClient getClient() {
+        int timeout = parameterService.getIntValue(ParameterService.BC_TIMEOUT, 30000);
+
+        String authHeader = parameterService.getBasicAuthHeader();
+
+        return webClientBuilder
+                .defaultHeader(HttpHeaders.AUTHORIZATION, authHeader)
+                .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                .defaultHeader(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
+                .build();
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // URLs de base dynamiques
+    // ─────────────────────────────────────────────────────────────
+    private String standardBase() {
+        return parameterService.getStandardBaseUrl();
+    }
+
+    private String customBase() {
+        return parameterService.getCustomBaseUrl();
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // MÉTHODES PUBLIQUES
+    // ─────────────────────────────────────────────────────────────
+
+    /**
+     * GET sur une API CUSTOM (extension)
+     * ex: {customBase}/companies(ID)/quoteLines?$filter=...
+     */
+    public <T> T getCustom(String endpoint,
+                           String companyId,
+                           Map<String, String> queryParams,
+                           Class<T> responseType) {
+        String url = buildUrl(customBase(), companyId, endpoint, queryParams);
+        log.info("BC GET Custom URL = {}", url);
+        return execute(getClient().get().uri(url), responseType, "GET Custom");
+    }
+
+    /**
+     * GET sur une API STANDARD (Microsoft)
+     * ex: {standardBase}/companies(ID)/items?$filter=...
+     */
+    public <T> T getStandard(String endpoint,
+                             String companyId,
+                             Map<String, String> queryParams,
+                             Class<T> responseType) {
+        String url = buildUrl(standardBase(), companyId, endpoint, queryParams);
+        log.info("BC GET Standard URL = {}", url);
+        return execute(getClient().get().uri(url), responseType, "GET Standard");
+    }
+
+    /**
+     * POST sur API CUSTOM
+     */
+    public <T, R> R postCustom(String endpoint,
+                               String companyId,
+                               T body,
+                               Class<R> responseType) {
+        String url = buildUrl(customBase(), companyId, endpoint, null);
+        log.info("BC POST Custom URL = {}", url);
+        return execute(getClient().post().uri(url).bodyValue(body), responseType, "POST Custom");
+    }
+
+    /**
+     * PATCH sur une API CUSTOM (extension)
+     * ex: companies(ID)/quoteLines(<id>)
+     */
+    public <T> T patchCustom(String endpoint,
+                             String companyId,
+                             String resourceId,
+                             Object body,
+                             String ifMatch,
+                             Class<T> responseType) {
+
+        String path = endpoint + "(" + resourceId + ")";
+        String url = buildUrl(customBase(), companyId, path, null);
+        log.info("BC PATCH Custom URL = {}", url);
+
+        // 1) Construction de la requête PATCH (RequestBodySpec)
+        WebClient.RequestBodySpec bodySpec = getClient()
+                .patch()
+                .uri(url)
+                .header(HttpHeaders.IF_MATCH, ifMatch)
+                .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE);
+
+        // 2) Application éventuelle du body → RequestHeadersSpec
+        WebClient.RequestHeadersSpec<?> spec = (body != null)
+                ? bodySpec.bodyValue(body)
+                : bodySpec;
+
+        // 3) Exécution générique
+        return execute(spec, responseType, "PATCH Custom");
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // UTILITAIRES PRIVÉS
+    // ─────────────────────────────────────────────────────────────
+    private String buildUrl(String base,
+                            String companyId,
+                            String endpoint,
+                            Map<String, String> queryParams) {
+        StringBuilder url = new StringBuilder(base); // base se termine par /
+
+        if (companyId != null && !companyId.isBlank()) {
+            url.append("companies(").append(companyId).append(")/");
+        }
+
+        url.append(endpoint);  // ex: "quoteLines"
+
+        if (queryParams != null && !queryParams.isEmpty()) {
+            url.append("?");
+            queryParams.forEach((k, v) -> url.append(k).append("=").append(v).append("&"));
+            url.setLength(url.length() - 1); // retire le dernier "&"
+        }
+        return url.toString();
+    }
+
+    private <T> T execute(WebClient.RequestHeadersSpec<?> spec,
+                          Class<T> responseType,
+                          String operation) {
+        try {
+            return spec.retrieve()
+                    .bodyToMono(responseType)
+                    .timeout(Duration.ofMillis(parameterService.getIntValue(ParameterService.BC_TIMEOUT, 30000)))
+                    .block();
+        } catch (Exception e) {
+            log.error("Erreur BC {} : {}", operation, e.getMessage());
+            throw new ApiException(
+                    ErrorCode.BC_API_ERROR,
+                    "Erreur communication Business Central : " + e.getMessage(),
+                    e
+            );
+        }
+    }
+
+    public boolean testConnection() {
+        try {
+            getClient().get()
+                    .uri(standardBase())
+                    .retrieve()
+                    .toBodilessEntity()
+                    .timeout(Duration.ofSeconds(5))
+                    .block();
+            log.info("Connexion BC On-Premise OK");
+            return true;
+        } catch (Exception e) {
+            log.error("Connexion BC échouée : {}", e.getMessage());
+            return false;
+        }
+    }
+}

@@ -2,11 +2,14 @@ package com.reapro.achat.Controller;
 
 import com.reapro.achat.DTO.ArticleVerificationResponse;
 import com.reapro.achat.DTO.tecdoc.TecDocApiResponse;
+import com.reapro.achat.DTO.tecdoc.TecDocVehicleDetail;
 import com.reapro.achat.services.ArticleVerificationService;
 import com.reapro.achat.services.TecDocService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/tecdoc")
@@ -42,5 +45,13 @@ public class TecDocController {
             @RequestParam("query") String searchQuery
     ) {
         return verificationService.verifyArticles(email, searchQuery);
+    }
+
+
+    @GetMapping("/article-vehicles")
+    public List<TecDocVehicleDetail> getArticleVehicles(
+            @RequestParam Long articleId,
+            @RequestParam Long manuId) {
+        return tecDocService.getLinkedVehiclesDetails(articleId, manuId);
     }
 }

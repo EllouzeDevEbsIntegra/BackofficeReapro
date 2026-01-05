@@ -19,11 +19,23 @@ public class TecDocArticle {
     private List<TecDocPdf> pdfs;
     private List<TecDocCriteria> articleCriteria;
 
+    // Nouveau champ pour stocker les constructeurs de véhicules liés
+    private List<VehicleManufacturer> linkedVehicles;
+
+    @Data
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class VehicleManufacturer {
+        private Long manuId;
+        private String manuName;
+    }
+
     @Data
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class TecDocGenericArticle {
         private Long genericArticleId;
         private String genericArticleDescription;
+        // Champ indispensable pour l'appel à la seconde API
+        private Long legacyArticleId;
     }
 
     @Data

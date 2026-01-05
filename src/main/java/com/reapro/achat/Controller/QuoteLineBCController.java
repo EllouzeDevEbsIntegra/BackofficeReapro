@@ -2,11 +2,16 @@ package com.reapro.achat.Controller;
 
 import com.reapro.achat.DTO.bc.QuoteLineBC;
 import com.reapro.achat.DTO.bc.QuoteLineUpdateRequest;
+import com.reapro.achat.entities.primary.Admin;
+import com.reapro.achat.repositories.primary.AdminRepository;
 import com.reapro.achat.services.QuoteLineBCService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 @RestController
@@ -15,6 +20,7 @@ import java.util.List;
 public class QuoteLineBCController {
 
     private final QuoteLineBCService service;
+    private final AdminRepository adminRepository;
 
     /**
      * GET : liste des lignes de devis filtrées par CompareQuoteNo + ReferenceMaster
@@ -30,13 +36,6 @@ public class QuoteLineBCController {
 
     /**
      * PATCH : mise à jour d'une ligne de devis.
-     *
-     * Le front fournit :
-     *   - l'id de la ligne (path variable)
-     *   - le body JSON avec les champs à modifier
-     * Le backend s'occupe de :
-     *   - récupérer l'ETag actuel auprès de BC
-     *   - appeler PATCH BC avec If-Match
      */
     @PatchMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
@@ -46,5 +45,26 @@ public class QuoteLineBCController {
             @RequestBody QuoteLineUpdateRequest request
     ) {
         service.updateQuoteLine(companyId, id, request);
+    }
+
+    /**
+     * GET : Calcule le montant total d'un document via une action BC optimisée.
+     */
+    @GetMapping("/total-amount")
+    public ResponseEntity<BigDecimal> getTotalAmount(
+            @RequestParam String documentNo,
+            @AuthenticationPrincipal String email) {
+
+        // Correction : Utilisation de l'instance injectée adminRepository
+        Admin admin = adminRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("Utilisateur non trouvé"));
+
+        // Vérification de la société affectée au profil
+        if (admin.getBcCompanyId() == null || admin.getBcCompanyId().isBlank()) {
+            return ResponseEntity.badRequest().body(BigDecimal.ZERO);
+        }
+
+        BigDecimal total = service.getTotalAmountFromBC(admin.getBcCompanyId(), documentNo);
+        return ResponseEntity.ok(total);
     }
 }

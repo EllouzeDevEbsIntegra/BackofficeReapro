@@ -100,6 +100,9 @@ public class QuoteLineBC {
     @JsonProperty("quoteLineReason")
     private String quoteLineReason;
 
+    @JsonProperty("QuoteLineComment")
+    private String quoteLineComment;
+
     @JsonProperty("askingPrice")
     private BigDecimal askingPrice;
 

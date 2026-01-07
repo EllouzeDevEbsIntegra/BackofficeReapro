@@ -44,7 +44,9 @@ public class ElvaItemKitService {
                         rs.getString("description"),
                         rs.getString("itemKit"),
                         rs.getString("descriptionItemKit"),
-                        rs.getString("kit")
+                        rs.getString("kit"),
+                        null, // existPurchaseCart (sera rempli plus tard par ItemsKitService)
+                        null  // commentPurchaseCart (sera rempli plus tard par ItemsKitService)
                 )
         );
     }

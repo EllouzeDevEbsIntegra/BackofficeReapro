@@ -6,6 +6,7 @@ import com.reapro.achat.DTO.ElvaItemKitResponse;
 import com.reapro.achat.DTO.PagedResponse;
 import com.reapro.achat.DTO.bc.BcItemBC;
 import com.reapro.achat.DTO.bc.BcListResponse;
+import com.reapro.achat.DTO.bc.PurchaseCartLineBC;
 import com.reapro.achat.config.ApplicationContextProvider;
 import com.reapro.achat.entities.primary.Admin;
 import com.reapro.achat.entities.sqlserver.LastInvoicedItemCost;
@@ -33,6 +34,7 @@ public class ItemsKitService {
     private final ElvaItemKitService elvaItemKitService;
     private final BusinessCentralService bcService;
     private final LastInvoicedItemCostRepository lastInvoicedRepo;
+    private final PurchaseCartService purchaseCartService;
 
     // Ajuste si tu as beaucoup de kits (évite URL trop longue)
     private static final int BC_FILTER_CHUNK_SIZE = 30;
@@ -49,7 +51,8 @@ public class ItemsKitService {
             String userEmail,
             String no,
             int page,
-            int size
+            int size,
+            String compareQuoteNo
     ) {
         if (no == null || no.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Le paramètre 'no' est obligatoire.");
@@ -70,7 +73,7 @@ public class ItemsKitService {
 
         String companyId = admin.getBcCompanyId().trim();
 
-        List<BcItemEnrichedResponse> all = loadItemsKitRaw(companyId, no.trim());
+        List<BcItemEnrichedResponse> all = loadItemsKitRaw(companyId, no.trim(), compareQuoteNo);
 
         // 3) pagination locale
         long totalElements = all.size();
@@ -85,7 +88,7 @@ public class ItemsKitService {
         return new PagedResponse<>(all.subList(from, to), page, size, totalElements, totalPages);
     }
 
-    public List<BcItemEnrichedResponse> loadItemsKitRaw(String companyId, String no) {
+    public List<BcItemEnrichedResponse> loadItemsKitRaw(String companyId, String no, String compareQuoteNo) {
 
         log.info("CACHE MISS itemsKitRaw => recalcul pour companyId={}, no={}", companyId, no);
         String inputNo = no.trim();
@@ -150,14 +153,25 @@ public class ItemsKitService {
                 return db.isAfter(da) ? b : a;
             });
         }
+        
+        // 7.5) Récupération des lignes du panier (si compareQuoteNo fourni)
+        Map<String, PurchaseCartLineBC> cartLinesMap = purchaseCartService.getPurchaseCartLinesMap(companyId, compareQuoteNo);
 
         return allBcItems.stream().map(it -> {
             LastInvoicedItemCost lc = byNo.get(safe(it.getNo()).trim());
+            
+            // Vérification Panier
+            PurchaseCartLineBC cartLine = cartLinesMap.get(safe(it.getNo()));
+            boolean existInCart = (cartLine != null);
+            String commentInCart = (cartLine != null) ? cartLine.getComment() : null;
+            
             return new BcItemEnrichedResponse(
                     it,
                     lc != null ? lc.getLastInvoicedDirectCost() : null,
                     lc != null ? lc.getQuantity() : null,
-                    lc != null ? lc.getLastInvoicedCostDate() : null
+                    lc != null ? lc.getLastInvoicedCostDate() : null,
+                    existInCart,
+                    commentInCart
             );
         }).toList();
     }

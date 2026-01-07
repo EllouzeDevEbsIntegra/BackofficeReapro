@@ -1,5 +1,6 @@
 package com.reapro.achat.services;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.reapro.achat.exceptions.ApiException;
 import com.reapro.achat.exceptions.ErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +20,7 @@ public class BusinessCentralService {
 
     private final WebClient.Builder webClientBuilder;
     private final ParameterService parameterService;
+    private final ObjectMapper objectMapper;
 
     // ─────────────────────────────────────────────────────────────
     // Configuration du WebClient
@@ -85,6 +87,11 @@ public class BusinessCentralService {
                                Class<R> responseType) {
         String url = buildUrl(customBase(), companyId, endpoint, null);
         log.info("BC POST Custom URL = {}", url);
+        try {
+            log.info("BC POST Body: {}", objectMapper.writeValueAsString(body));
+        } catch (Exception e) {
+            log.warn("Could not serialize POST body for logging", e);
+        }
         return execute(getClient().post().uri(url).bodyValue(body), responseType, "POST Custom");
     }
 
@@ -102,6 +109,14 @@ public class BusinessCentralService {
         String path = endpoint + "(" + resourceId + ")";
         String url = buildUrl(customBase(), companyId, path, null);
         log.info("BC PATCH Custom URL = {}", url);
+
+        if (body != null) {
+            try {
+                log.info("BC PATCH Body: {}", objectMapper.writeValueAsString(body));
+            } catch (Exception e) {
+                log.warn("Could not serialize PATCH body for logging", e);
+            }
+        }
 
         // 1) Construction de la requête PATCH (RequestBodySpec)
         WebClient.RequestBodySpec bodySpec = getClient()

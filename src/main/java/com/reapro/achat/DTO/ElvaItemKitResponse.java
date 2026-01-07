@@ -11,4 +11,7 @@ public class ElvaItemKitResponse {
     private String itemKit;
     private String descriptionItemKit;
     private String kit;
+    
+    private Boolean existPurchaseCart;
+    private String commentPurchaseCart;
 }

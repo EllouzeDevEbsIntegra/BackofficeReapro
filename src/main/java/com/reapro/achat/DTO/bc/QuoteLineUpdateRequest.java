@@ -19,7 +19,11 @@ public class QuoteLineUpdateRequest {
     private BigDecimal askingQty;      // "askingQty"
     private BigDecimal quantity;       // "quantity"
     private String quoteLineReason;
+    
     @JsonProperty("QuoteLineComment") // Nom envoyé VERS Business Central
     @JsonAlias("quoteLineComment")    // Nom accepté VENANT de Postman/Front-end
     private String quoteLineComment;
+
+    @JsonProperty("treated")
+    private Boolean treated;
 }

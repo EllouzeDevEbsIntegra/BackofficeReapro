@@ -18,4 +18,7 @@ public class BcItemEnrichedResponse {
     private BigDecimal lastInvoicedDirectCost;
     private BigDecimal quantity;
     private LocalDate lastInvoicedCostDate;
+    
+    private Boolean existPurchaseCart;
+    private String commentPurchaseCart;
 }

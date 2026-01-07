@@ -5,6 +5,7 @@ import com.reapro.achat.DTO.BcItemEnrichedResponse;
 import com.reapro.achat.DTO.PagedResponse;
 import com.reapro.achat.DTO.bc.BcItemBC;
 import com.reapro.achat.DTO.bc.BcListResponse;
+import com.reapro.achat.DTO.bc.PurchaseCartLineBC;
 import com.reapro.achat.entities.sqlserver.LastInvoicedItemCost;
 import com.reapro.achat.repositories.sqlserver.LastInvoicedItemCostRepository;
 import lombok.Data;
@@ -21,20 +22,22 @@ public class BcItemBCService {
 
     private final BusinessCentralService bcService;
     private final LastInvoicedItemCostRepository lastInvoicedRepo;
+    private final PurchaseCartService purchaseCartService;
 
     public PagedResponse<BcItemEnrichedResponse> getItemsByReferenceAndNotNoSortedLocally(
             String companyId,
             String referenceMaster,
             String noNe,
             int page,
-            int size
+            int size,
+            String compareQuoteNo
     ) {
         if (page < 0) page = 0;
         if (size <= 0) size = 20;
 
 
         List<BcItemEnrichedResponse> allEnriched =
-                loadItemsEqvRaw(companyId, referenceMaster, noNe);
+                loadItemsEqvRaw(companyId, referenceMaster, noNe, compareQuoteNo);
 
         long totalElements = allEnriched.size();
         int totalPages = (int) Math.ceil((double) totalElements / size);
@@ -99,7 +102,7 @@ public class BcItemBCService {
 
         return result;
     }
-    public List<BcItemEnrichedResponse> loadItemsEqvRaw(String companyId, String referenceMaster, String noNe) {
+    public List<BcItemEnrichedResponse> loadItemsEqvRaw(String companyId, String referenceMaster, String noNe, String compareQuoteNo) {
 
         log.info("CACHE MISS itemsEqvRaw => recalcul pour companyId={}, referenceMaster={}, noNe={}",
                 companyId, referenceMaster, noNe);
@@ -135,15 +138,26 @@ public class BcItemBCService {
                 return b.getLastInvoicedCostDate().isAfter(a.getLastInvoicedCostDate()) ? b : a;
             });
         }
+        
+        // 3.5) Récupération des lignes du panier (si compareQuoteNo fourni)
+        Map<String, PurchaseCartLineBC> cartLinesMap = purchaseCartService.getPurchaseCartLinesMap(companyId, compareQuoteNo);
 
         // 4) Construire la liste enrichie finale
         return all.stream().map(it -> {
             LastInvoicedItemCost lc = byNo.get(safe(it.getNo()).trim());
+            
+            // Vérification Panier
+            PurchaseCartLineBC cartLine = cartLinesMap.get(safe(it.getNo()));
+            boolean existInCart = (cartLine != null);
+            String commentInCart = (cartLine != null) ? cartLine.getComment() : null;
+            
             return new BcItemEnrichedResponse(
                     it,
                     lc != null ? lc.getLastInvoicedDirectCost() : null,
                     lc != null ? lc.getQuantity() : null,
-                    lc != null ? lc.getLastInvoicedCostDate() : null
+                    lc != null ? lc.getLastInvoicedCostDate() : null,
+                    existInCart,
+                    commentInCart
             );
         }).toList();
     }

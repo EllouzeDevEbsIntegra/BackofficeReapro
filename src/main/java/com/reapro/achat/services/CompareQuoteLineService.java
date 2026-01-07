@@ -4,6 +4,7 @@ import com.reapro.achat.DTO.CompareQuoteLineResponse;
 import com.reapro.achat.entities.sqlserver.CompareQuoteLine;
 import com.reapro.achat.repositories.sqlserver.CompareQuoteLineRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -11,6 +12,7 @@ import org.springframework.stereotype.Service;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class CompareQuoteLineService {
 
     private final CompareQuoteLineRepository repository;
@@ -42,6 +44,10 @@ public class CompareQuoteLineService {
                 spec = spec.and((root, query, cb) -> cb.greaterThan(root.get("nbLineNotThreated"), 0));
             }
         }
+
+        // Log de la requête SQL approximative (JPA ne donne pas le SQL exact facilement ici, mais on peut logger les paramètres)
+        log.info("Fetching CompareQuoteLines for compareQuoteNo={}, search={}, itemNo={}, pageNumber={}, isTreated={}", 
+                compareQuoteNo, search, itemNo, pageNumber, isTreated);
 
         // 4. Exécution de la requête
         Page<CompareQuoteLine> page = repository.findAll(spec, pageable);

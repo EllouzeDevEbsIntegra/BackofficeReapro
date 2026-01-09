@@ -3,6 +3,7 @@ package com.reapro.achat.services;
 import com.reapro.achat.DTO.ElvaItemKitResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -18,6 +19,9 @@ public class ElvaItemKitService {
 
     private final NamedParameterJdbcTemplate sqlServerJdbcTemplate;
 
+    // Cache la structure du kit (composition) car elle change rarement.
+    // Le nom du cache "kitsStructure" doit être configuré dans CacheConfig si vous voulez un TTL spécifique (ex: 1h ou 1 jour).
+    @Cacheable(value = "kitsStructure", key = "#article")
     public List<ElvaItemKitResponse> getByArticle(String article) {
         if (article == null || article.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Le paramètre 'article' est obligatoire.");
@@ -34,7 +38,7 @@ public class ElvaItemKitService {
             WHERE [Article] = :article OR [Item Kit] = :article
             """;
 
-        log.info("SQL KIT : {}", sql);
+        log.info("SQL KIT (Cache Miss) : {}", sql);
 
         return sqlServerJdbcTemplate.query(
                 sql,

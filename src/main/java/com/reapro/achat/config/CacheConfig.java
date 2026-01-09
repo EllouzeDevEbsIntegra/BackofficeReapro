@@ -23,6 +23,9 @@ public class CacheConfig {
     public static final String LEDGER_RECAP        = "itemLedgerEntriesRecap";
 
     public static final String CACHE_BC_MANUFACTURERS = "bcManufacturers";
+    
+    // ✅ Nouveau cache pour la structure des kits
+    public static final String KITS_STRUCTURE      = "kitsStructure";
 
     @Bean
     public CacheManager cacheManager() {
@@ -62,8 +65,17 @@ public class CacheConfig {
                         .maximumSize(100) // Une entrée par companyId
                         .build()
         );
+        
+        // Cache pour la structure des kits (TTL long car change rarement)
+        CaffeineCache kitsStructure = new CaffeineCache(
+                KITS_STRUCTURE,
+                Caffeine.newBuilder()
+                        .expireAfterWrite(24, TimeUnit.HOURS) // 24h de cache
+                        .maximumSize(5000)
+                        .build()
+        );
 
-        manager.setCaches(List.of(ledgerPage, ledgerRecap, bcParameters,  bcManufacturers));
+        manager.setCaches(List.of(ledgerPage, ledgerRecap, bcParameters, bcManufacturers, kitsStructure));
         return manager;
     }
 }

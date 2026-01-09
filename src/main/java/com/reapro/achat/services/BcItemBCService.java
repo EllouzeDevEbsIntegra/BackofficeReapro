@@ -14,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 
 @Service
 @RequiredArgsConstructor
@@ -35,89 +36,80 @@ public class BcItemBCService {
         if (page < 0) page = 0;
         if (size <= 0) size = 20;
 
-
-        List<BcItemEnrichedResponse> allEnriched =
-                loadItemsEqvRaw(companyId, referenceMaster, noNe, compareQuoteNo);
-
-        long totalElements = allEnriched.size();
+        // 1. Récupérer le total (count) pour la pagination correcte
+        long totalElements = countItems(companyId, referenceMaster, noNe);
         int totalPages = (int) Math.ceil((double) totalElements / size);
 
-        int from = page * size;
-        if (from >= allEnriched.size()) {
-            return new PagedResponse<>(List.of(), page, size, totalElements, totalPages);
+        if (totalElements == 0) {
+            return new PagedResponse<>(List.of(), page, size, 0, 0);
         }
-        int to = Math.min(from + size, allEnriched.size());
 
-        List<BcItemEnrichedResponse> content = allEnriched.subList(from, to);
+        // 2. Récupérer la page demandée directement depuis BC (Trié et Paginé)
+        List<BcItemEnrichedResponse> content = loadItemsEqvPage(
+                companyId, referenceMaster, noNe, compareQuoteNo, page, size
+        );
 
         return new PagedResponse<>(content, page, size, totalElements, totalPages);
     }
 
+    private long countItems(String companyId, String referenceMaster, String noNe) {
+        String filter = buildFilter(referenceMaster, noNe);
+        Map<String, String> params = new HashMap<>();
+        params.put("$filter", filter);
+        params.put("$top", "0");
+        params.put("$count", "true");
 
-    private List<BcItemBC> fetchAllBcItems(String companyId, String referenceMaster, String noNe) {
-        String filter = String.format(
-                "ReferenceMaster eq '%s' and no ne '%s'",
-                escapeOData(referenceMaster),
-                escapeOData(noNe)
+        BcItemListResponse resp = bcService.getCustom("bcItems", companyId, params, BcItemListResponse.class);
+        // BcListResponse a un champ @JsonProperty("@odata.count") mappé si on utilise BcCountListResponse,
+        // mais ici on utilise BcItemListResponse qui hérite de BcListResponse simple.
+        // Il faut vérifier si BcListResponse gère le count ou utiliser une classe dédiée.
+        // Pour simplifier et éviter de créer une classe, on peut utiliser BcCountListResponseWrapper de PurchaseCartService ou similaire,
+        // ou supposer que le count est dans le body si on le mappe.
+        // Le plus simple est de faire un appel dédié ou d'adapter la réponse.
+        // Comme je ne veux pas casser l'existant, je vais utiliser une classe interne dédiée au count.
+
+        return getCountFromBc(companyId, params);
+    }
+
+    private long getCountFromBc(String companyId, Map<String, String> params) {
+        // Utilisation d'une classe ad-hoc pour récupérer le count
+        BcCountResponse resp = bcService.getCustom("bcItems", companyId, params, BcCountResponse.class);
+        return resp != null && resp.getCount() != null ? resp.getCount() : 0;
+    }
+
+    private List<BcItemEnrichedResponse> loadItemsEqvPage(
+            String companyId,
+            String referenceMaster,
+            String noNe,
+            String compareQuoteNo,
+            int page,
+            int size
+    ) {
+        // 1) Appel BC Paginé
+        String filter = buildFilter(referenceMaster, noNe);
+        Map<String, String> params = new LinkedHashMap<>();
+        params.put("$filter", filter);
+        params.put("$orderby", "lastPurshCostDS desc, no asc"); // Tri demandé
+        params.put("$top", String.valueOf(size));
+        params.put("$skip", String.valueOf(page * size));
+        params.put("$select",
+                "id,vendorNo,VendorItemNo, manufacturerTecdocId,no,ReferenceMaster,descriptionStructured," +
+                        "qtyStock,qtyImport,qtyOnPurchOrder,totalVendu,totalAchete," +
+                        "lastPurshCostDS,lastPurshDate,unitPrice,lastCurrPrice,lastDate," +
+                        "styleQty,styleImportQty,styleOnPurchQty," +
+                        "LastPreferential,venduCurrYear,acheteCurrYear"
         );
 
-        final int top = 1000;
-        int skip = 0;
+        BcItemListResponse resp = bcService.getCustom("bcItems", companyId, params, BcItemListResponse.class);
+        List<BcItemBC> pageItems = (resp != null && resp.getValue() != null) ? resp.getValue() : List.of();
 
-        List<BcItemBC> result = new ArrayList<>();
-
-        while (true) {
-            Map<String, String> params = new LinkedHashMap<>();
-            params.put("$filter", filter);
-
-            // Limiter les champs retournés (inclut manufacturerTecdocId)
-            params.put("$select",
-                    "id,vendorNo,VendorItemNo, manufacturerTecdocId,no,ReferenceMaster,descriptionStructured," +
-                            "qtyStock,qtyImport,qtyOnPurchOrder,totalVendu,totalAchete," +
-                            "lastPurshCostDS,lastPurshDate,unitPrice,lastCurrPrice,lastDate," +
-                            "styleQty,styleImportQty,styleOnPurchQty," +
-                            "LastPreferential,venduCurrYear,acheteCurrYear"
-            );
-
-            params.put("$top", String.valueOf(top));
-            params.put("$skip", String.valueOf(skip));
-
-            BcItemListResponse resp = bcService.getCustom(
-                    "bcItems",
-                    companyId,
-                    params,
-                    BcItemListResponse.class
-            );
-
-            List<BcItemBC> page = (resp != null && resp.getValue() != null) ? resp.getValue() : List.of();
-            if (page.isEmpty()) break;
-
-            result.addAll(page);
-
-            if (page.size() < top) break;
-            skip += top;
-
-            if (skip > 500_000) break; // garde-fou
+        if (pageItems.isEmpty()) {
+            return List.of();
         }
 
-        return result;
-    }
-    public List<BcItemEnrichedResponse> loadItemsEqvRaw(String companyId, String referenceMaster, String noNe, String compareQuoteNo) {
+        // 2) Enrichissement Parallèle (SQL + Panier) sur les items de la page SEULEMENT
 
-        log.info("CACHE MISS itemsEqvRaw => recalcul pour companyId={}, referenceMaster={}, noNe={}",
-                companyId, referenceMaster, noNe);
-
-        // 1) Charger toutes les lignes BC
-        List<BcItemBC> all = fetchAllBcItems(companyId, referenceMaster, noNe);
-
-        // 2) Tri local (LastPurshCostDS DESC)
-        all.sort(Comparator
-                .comparing((BcItemBC i) -> nz(i.getLastPurshCostDS()), Comparator.reverseOrder())
-                .thenComparing(i -> safe(i.getNo()))
-        );
-
-        // 3) Enrichissement SQL (index par no uniquement) - 1 seule requête
-        List<String> itemNos = all.stream()
+        List<String> itemNos = pageItems.stream()
                 .map(BcItemBC::getNo)
                 .filter(Objects::nonNull)
                 .map(String::trim)
@@ -125,28 +117,34 @@ public class BcItemBCService {
                 .distinct()
                 .toList();
 
-        List<LastInvoicedItemCost> lastCosts = itemNos.isEmpty()
-                ? List.of()
-                : lastInvoicedRepo.findByNoIn(itemNos);
+        CompletableFuture<Map<String, LastInvoicedItemCost>> costsFuture = CompletableFuture.supplyAsync(() -> {
+            if (itemNos.isEmpty()) return Collections.emptyMap();
+            List<LastInvoicedItemCost> lastCosts = lastInvoicedRepo.findByNoIn(itemNos);
+            Map<String, LastInvoicedItemCost> map = new HashMap<>();
+            for (LastInvoicedItemCost lc : lastCosts) {
+                String keyNo = safe(lc.getNo()).trim();
+                map.merge(keyNo, lc, (a, b) -> {
+                    if (a.getLastInvoicedCostDate() == null) return b;
+                    if (b.getLastInvoicedCostDate() == null) return a;
+                    return b.getLastInvoicedCostDate().isAfter(a.getLastInvoicedCostDate()) ? b : a;
+                });
+            }
+            return map;
+        });
 
-        Map<String, LastInvoicedItemCost> byNo = new HashMap<>();
-        for (LastInvoicedItemCost lc : lastCosts) {
-            String keyNo = safe(lc.getNo()).trim();
-            byNo.merge(keyNo, lc, (a, b) -> {
-                if (a.getLastInvoicedCostDate() == null) return b;
-                if (b.getLastInvoicedCostDate() == null) return a;
-                return b.getLastInvoicedCostDate().isAfter(a.getLastInvoicedCostDate()) ? b : a;
-            });
-        }
-        
-        // 3.5) Récupération des lignes du panier (si compareQuoteNo fourni)
-        Map<String, PurchaseCartLineBC> cartLinesMap = purchaseCartService.getPurchaseCartLinesMap(companyId, compareQuoteNo);
+        CompletableFuture<Map<String, PurchaseCartLineBC>> cartFuture = CompletableFuture.supplyAsync(() ->
+            purchaseCartService.getPurchaseCartLinesMap(companyId, compareQuoteNo)
+        );
 
-        // 4) Construire la liste enrichie finale
-        return all.stream().map(it -> {
+        CompletableFuture.allOf(costsFuture, cartFuture).join();
+
+        Map<String, LastInvoicedItemCost> byNo = costsFuture.join();
+        Map<String, PurchaseCartLineBC> cartLinesMap = cartFuture.join();
+
+        // 3) Construction de la réponse
+        return pageItems.stream().map(it -> {
             LastInvoicedItemCost lc = byNo.get(safe(it.getNo()).trim());
             
-            // Vérification Panier
             PurchaseCartLineBC cartLine = cartLinesMap.get(safe(it.getNo()));
             boolean existInCart = (cartLine != null);
             String commentInCart = (cartLine != null) ? cartLine.getComment() : null;
@@ -162,8 +160,12 @@ public class BcItemBCService {
         }).toList();
     }
 
-    private BigDecimal nz(BigDecimal v) {
-        return v == null ? BigDecimal.ZERO : v;
+    private String buildFilter(String referenceMaster, String noNe) {
+        return String.format(
+                "ReferenceMaster eq '%s' and no ne '%s'",
+                escapeOData(referenceMaster),
+                escapeOData(noNe)
+        );
     }
 
     private String safe(String s) {
@@ -177,4 +179,11 @@ public class BcItemBCService {
     @Data
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class BcItemListResponse extends BcListResponse<BcItemBC> {}
+
+    @Data
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class BcCountResponse {
+        @com.fasterxml.jackson.annotation.JsonProperty("@odata.count")
+        private Long count;
+    }
 }

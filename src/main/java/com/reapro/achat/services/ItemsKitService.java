@@ -23,6 +23,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 @Service
@@ -138,24 +139,37 @@ public class ItemsKitService {
                 .distinct()
                 .toList();
 
-        List<LastInvoicedItemCost> lastCosts = itemNos.isEmpty()
-                ? List.of()
-                : lastInvoicedRepo.findByNoIn(itemNos);
-
-        Map<String, LastInvoicedItemCost> byNo = new HashMap<>();
-        for (LastInvoicedItemCost lc : lastCosts) {
-            String key = safe(lc.getNo()).trim();
-            byNo.merge(key, lc, (a, b) -> {
-                LocalDate da = a.getLastInvoicedCostDate();
-                LocalDate db = b.getLastInvoicedCostDate();
-                if (da == null) return b;
-                if (db == null) return a;
-                return db.isAfter(da) ? b : a;
-            });
-        }
+        // 8) Exécution PARALLÈLE : SQL Costs + BC Panier
         
-        // 7.5) Récupération des lignes du panier (si compareQuoteNo fourni)
-        Map<String, PurchaseCartLineBC> cartLinesMap = purchaseCartService.getPurchaseCartLinesMap(companyId, compareQuoteNo);
+        // Tâche A : Récupération SQL
+        CompletableFuture<Map<String, LastInvoicedItemCost>> costsFuture = CompletableFuture.supplyAsync(() -> {
+            if (itemNos.isEmpty()) return Collections.emptyMap();
+            
+            List<LastInvoicedItemCost> lastCosts = lastInvoicedRepo.findByNoIn(itemNos);
+            Map<String, LastInvoicedItemCost> map = new HashMap<>();
+            for (LastInvoicedItemCost lc : lastCosts) {
+                String key = safe(lc.getNo()).trim();
+                map.merge(key, lc, (a, b) -> {
+                    LocalDate da = a.getLastInvoicedCostDate();
+                    LocalDate db = b.getLastInvoicedCostDate();
+                    if (da == null) return b;
+                    if (db == null) return a;
+                    return db.isAfter(da) ? b : a;
+                });
+            }
+            return map;
+        });
+
+        // Tâche B : Récupération Panier BC
+        CompletableFuture<Map<String, PurchaseCartLineBC>> cartFuture = CompletableFuture.supplyAsync(() -> 
+            purchaseCartService.getPurchaseCartLinesMap(companyId, compareQuoteNo)
+        );
+
+        // Attente des deux tâches
+        CompletableFuture.allOf(costsFuture, cartFuture).join();
+
+        Map<String, LastInvoicedItemCost> byNo = costsFuture.join();
+        Map<String, PurchaseCartLineBC> cartLinesMap = cartFuture.join();
 
         return allBcItems.stream().map(it -> {
             LastInvoicedItemCost lc = byNo.get(safe(it.getNo()).trim());

@@ -82,5 +82,7 @@ public class BcItemBC {
     @JsonProperty("styleOnPurchQty")
     private String styleOnPurchQty;
 
+    @JsonProperty("toVerify")
+    private Boolean toVerify;
 
 }

@@ -45,10 +45,6 @@ public class CompareQuoteLineService {
             }
         }
 
-        // Log de la requête SQL approximative (JPA ne donne pas le SQL exact facilement ici, mais on peut logger les paramètres)
-        log.info("Fetching CompareQuoteLines for compareQuoteNo={}, search={}, itemNo={}, pageNumber={}, isTreated={}", 
-                compareQuoteNo, search, itemNo, pageNumber, isTreated);
-
         // 4. Exécution de la requête
         Page<CompareQuoteLine> page = repository.findAll(spec, pageable);
 

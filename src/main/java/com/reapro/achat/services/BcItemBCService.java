@@ -6,6 +6,7 @@ import com.reapro.achat.DTO.PagedResponse;
 import com.reapro.achat.DTO.bc.BcItemBC;
 import com.reapro.achat.DTO.bc.BcListResponse;
 import com.reapro.achat.DTO.bc.PurchaseCartLineBC;
+import com.reapro.achat.DTO.bc.SiItemCategory;
 import com.reapro.achat.entities.sqlserver.LastInvoicedItemCost;
 import com.reapro.achat.repositories.sqlserver.LastInvoicedItemCostRepository;
 import lombok.Data;
@@ -60,19 +61,10 @@ public class BcItemBCService {
         params.put("$count", "true");
 
         BcItemListResponse resp = bcService.getCustom("bcItems", companyId, params, BcItemListResponse.class);
-        // BcListResponse a un champ @JsonProperty("@odata.count") mappé si on utilise BcCountListResponse,
-        // mais ici on utilise BcItemListResponse qui hérite de BcListResponse simple.
-        // Il faut vérifier si BcListResponse gère le count ou utiliser une classe dédiée.
-        // Pour simplifier et éviter de créer une classe, on peut utiliser BcCountListResponseWrapper de PurchaseCartService ou similaire,
-        // ou supposer que le count est dans le body si on le mappe.
-        // Le plus simple est de faire un appel dédié ou d'adapter la réponse.
-        // Comme je ne veux pas casser l'existant, je vais utiliser une classe interne dédiée au count.
-
         return getCountFromBc(companyId, params);
     }
 
     private long getCountFromBc(String companyId, Map<String, String> params) {
-        // Utilisation d'une classe ad-hoc pour récupérer le count
         BcCountResponse resp = bcService.getCustom("bcItems", companyId, params, BcCountResponse.class);
         return resp != null && resp.getCount() != null ? resp.getCount() : 0;
     }
@@ -97,7 +89,7 @@ public class BcItemBCService {
                         "qtyStock,qtyImport,qtyOnPurchOrder,totalVendu,totalAchete," +
                         "lastPurshCostDS,lastPurshDate,unitPrice,lastCurrPrice,lastDate," +
                         "styleQty,styleImportQty,styleOnPurchQty," +
-                        "LastPreferential,venduCurrYear,acheteCurrYear"
+                        "LastPreferential,venduCurrYear,acheteCurrYear,toVerify"
         );
 
         BcItemListResponse resp = bcService.getCustom("bcItems", companyId, params, BcItemListResponse.class);
@@ -160,6 +152,55 @@ public class BcItemBCService {
         }).toList();
     }
 
+    public BcItemBC updateToVerifyByNo(String companyId, String no) {
+        // 1. Récupérer l'item pour avoir son ID et son ETag
+        Map<String, String> params = new HashMap<>();
+        params.put("$filter", "no eq '" + escapeOData(no) + "'");
+        
+        BcItemListResponse resp = bcService.getCustom("bcItems", companyId, params, BcItemListResponse.class);
+        
+        if (resp == null || resp.getValue() == null || resp.getValue().isEmpty()) {
+            throw new RuntimeException("Item not found with no: " + no);
+        }
+        
+        BcItemBC item = resp.getValue().get(0);
+        String id = item.getId();
+        String etag = item.getEtag(); 
+
+        if (etag == null || etag.isBlank()) {
+            etag = "*";
+        }
+
+        // 2. Faire le PATCH
+        Map<String, Object> body = new HashMap<>();
+        body.put("toVerify", true);
+        
+        return bcService.patchCustom("bcItems", companyId, id, body, etag, BcItemBC.class);
+    }
+
+    public List<SiItemCategory> getItemCategories(String companyId, Integer indentation, String parentCategory) {
+        Map<String, String> params = new HashMap<>();
+        
+        StringBuilder filter = new StringBuilder();
+        if (indentation != null) {
+            filter.append("Indentation eq ").append(indentation);
+        }
+        
+        if (parentCategory != null && !parentCategory.isBlank()) {
+            if (filter.length() > 0) {
+                filter.append(" and ");
+            }
+            filter.append("ParentCategory eq '").append(escapeOData(parentCategory)).append("'");
+        }
+        
+        if (filter.length() > 0) {
+            params.put("$filter", filter.toString());
+        }
+        
+        SiItemCategoryListResponse resp = bcService.getCustom("SiItemCategory", companyId, params, SiItemCategoryListResponse.class);
+        return (resp != null && resp.getValue() != null) ? resp.getValue() : List.of();
+    }
+
     private String buildFilter(String referenceMaster, String noNe) {
         return String.format(
                 "ReferenceMaster eq '%s' and no ne '%s'",
@@ -186,4 +227,8 @@ public class BcItemBCService {
         @com.fasterxml.jackson.annotation.JsonProperty("@odata.count")
         private Long count;
     }
+
+    @Data
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class SiItemCategoryListResponse extends BcListResponse<SiItemCategory> {}
 }

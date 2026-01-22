@@ -36,7 +36,8 @@ public class SecurityConfig {
                                 "/api/auth/refresh-token",
                                 "/api/auth/forgot-password",
                                 "/api/auth/verify-reset-code",
-                                "/api/auth/change-password"
+                                "/api/auth/change-password",
+                                "/auth/refresh-token"
                         ).permitAll()
 
                         // Toutes les autres routes → protégées

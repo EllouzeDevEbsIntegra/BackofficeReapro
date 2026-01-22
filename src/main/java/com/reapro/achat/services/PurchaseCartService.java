@@ -7,6 +7,9 @@ import com.reapro.achat.DTO.bc.PurchaseCartLineCreateRequest;
 import com.reapro.achat.DTO.bc.PurchaseCartLineUpdateRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -27,13 +30,24 @@ public class PurchaseCartService {
     public static class BcListResponseWrapper extends BcListResponse<PurchaseCartLineBC> {}
     public static class BcCountListResponseWrapper extends BcCountListResponse<PurchaseCartLineBC> {}
 
-    public BcListResponse<PurchaseCartLineBC> getPurchaseCartLines(String companyId, String compareQuoteNo, String status) {
-        Map<String, String> queryParams = new HashMap<>();
-        StringBuilder filter = new StringBuilder();
+    public Page<PurchaseCartLineBC> getPurchaseCartLines(String companyId, String compareQuoteNo, String status, String vendorNo, String itemNo, Pageable pageable) {
+        // 1. Construire le filtre OData
+        String filter = buildODataFilter(compareQuoteNo, status, vendorNo, itemNo);
 
-        // Construction du filtre : (statusPart) and compareQuoteNoPart
-        // L'ordre est important pour les parenthèses si on a des OR dans le status.
+        // 2. Obtenir le count total
+        long totalCount = getFilteredCount(companyId, filter);
+
+        // 3. Obtenir les données pour la page actuelle
+        List<PurchaseCartLineBC> pageData = getPageData(companyId, filter, pageable);
+
+        // 4. Construire et retourner l'objet Page
+        return new PageImpl<>(pageData, pageable, totalCount);
+    }
+
+    private String buildODataFilter(String compareQuoteNo, String status, String vendorNo, String itemNo) {
+        StringBuilder filter = new StringBuilder();
         
+        // Status filter
         String statusPart = null;
         if (status != null && !status.isEmpty()) {
             if (status.contains(" eq ")) {
@@ -43,11 +57,25 @@ public class PurchaseCartService {
             }
         }
 
+        // CompareQuoteNo filter
         String compareQuotePart = null;
         if (compareQuoteNo != null && !compareQuoteNo.isEmpty()) {
             compareQuotePart = "compareQuoteNo eq '" + compareQuoteNo + "'";
         }
 
+        // VendorNo filter
+        String vendorNoPart = null;
+        if (vendorNo != null && !vendorNo.isEmpty()) {
+            vendorNoPart = "buyFromVendorNo eq '" + vendorNo + "'";
+        }
+
+        // ItemNo filter
+        String itemNoPart = null;
+        if (itemNo != null && !itemNo.isEmpty()) {
+            itemNoPart = "itemNo eq '" + itemNo + "'";
+        }
+
+        // Append parts to the filter, adding " and " where necessary
         if (statusPart != null) {
             filter.append(statusPart);
         }
@@ -59,33 +87,72 @@ public class PurchaseCartService {
             filter.append(compareQuotePart);
         }
 
-        if (filter.length() > 0) {
-            queryParams.put("$filter", filter.toString());
+        if (vendorNoPart != null) {
+            if (filter.length() > 0) {
+                filter.append(" and ");
+            }
+            filter.append(vendorNoPart);
         }
 
-        return bcService.getCustom(
+        if (itemNoPart != null) {
+            if (filter.length() > 0) {
+                filter.append(" and ");
+            }
+            filter.append(itemNoPart);
+        }
+
+        return filter.toString();
+    }
+
+    private long getFilteredCount(String companyId, String filter) {
+        Map<String, String> queryParams = new HashMap<>();
+        if (filter != null && !filter.isEmpty()) {
+            queryParams.put("$filter", filter);
+        }
+        queryParams.put("$count", "true");
+        queryParams.put("$top", "0");
+
+        BcCountListResponseWrapper response = bcService.getCustom(
+                "purchaseCartLines",
+                companyId,
+                queryParams,
+                BcCountListResponseWrapper.class
+        );
+        return response != null && response.getCount() != null ? response.getCount() : 0;
+    }
+
+    private List<PurchaseCartLineBC> getPageData(String companyId, String filter, Pageable pageable) {
+        Map<String, String> queryParams = new HashMap<>();
+        if (filter != null && !filter.isEmpty()) {
+            queryParams.put("$filter", filter);
+        }
+        queryParams.put("$top", String.valueOf(pageable.getPageSize()));
+        queryParams.put("$skip", String.valueOf(pageable.getOffset()));
+
+        // Note: OData sorting can be added here if needed, e.g., queryParams.put("$orderby", "creationDate desc");
+
+        BcListResponseWrapper response = bcService.getCustom(
                 "purchaseCartLines",
                 companyId,
                 queryParams,
                 BcListResponseWrapper.class
         );
+        return response != null ? response.getValue() : Collections.emptyList();
     }
     
     public long getPurchaseCartLinesCount(String companyId, String compareQuoteNo, String itemNo) {
         Map<String, String> queryParams = new HashMap<>();
         
-        // Filtre de base : (status eq 'New' or status eq 'Verified') and compareQuoteNo eq '...'
         StringBuilder filter = new StringBuilder();
         filter.append(String.format("(status eq 'New' or status eq 'Verified') and compareQuoteNo eq '%s'", compareQuoteNo));
         
-        // Ajout optionnel de itemNo
         if (itemNo != null && !itemNo.isEmpty()) {
             filter.append(String.format(" and itemNo eq '%s'", itemNo));
         }
         
         queryParams.put("$filter", filter.toString());
         queryParams.put("$count", "true");
-        queryParams.put("$top", "0"); // On ne veut que le count, pas les données
+        queryParams.put("$top", "0");
 
         BcCountListResponseWrapper response = bcService.getCustom(
                 "purchaseCartLines",
@@ -97,24 +164,14 @@ public class PurchaseCartService {
         return response != null && response.getCount() != null ? response.getCount() : 0;
     }
 
-    /**
-     * Récupère toutes les lignes du panier pour un compareQuoteNo donné,
-     * filtrées par status (New ou Verified).
-     * Retourne une Map<ItemNo, PurchaseCartLineBC>.
-     * En cas de doublons (plusieurs lignes pour le même item), on prend la première (Top 1 implicite par la map).
-     */
     public Map<String, PurchaseCartLineBC> getPurchaseCartLinesMap(String companyId, String compareQuoteNo) {
         if (compareQuoteNo == null || compareQuoteNo.isBlank()) {
             return Collections.emptyMap();
         }
 
         Map<String, String> queryParams = new HashMap<>();
-        // Filtre : compareQuoteNo AND (status eq 'New' or status eq 'Verified')
         String filter = String.format("compareQuoteNo eq '%s' and (status eq 'New' or status eq 'Verified')", compareQuoteNo);
         queryParams.put("$filter", filter);
-        
-        // On ne limite pas le nombre de résultats (ou une limite raisonnable si besoin)
-        // BC pagine par défaut, il faudrait gérer la pagination si > 20000 lignes, mais pour un panier c'est rare.
         
         BcListResponseWrapper response = bcService.getCustom(
                 "purchaseCartLines",
@@ -127,7 +184,6 @@ public class PurchaseCartService {
             return Collections.emptyMap();
         }
 
-        // Conversion en Map. Si doublon de clé (itemNo), on garde l'existant (a, b) -> a
         return response.getValue().stream()
                 .filter(line -> line.getItemNo() != null)
                 .collect(Collectors.toMap(
@@ -156,7 +212,6 @@ public class PurchaseCartService {
 
         PurchaseCartLineBC result = null;
 
-        // Vérifier si on a des champs à mettre à jour via PATCH (quantity, directUnitCost, comment)
         boolean hasPatchFields = request.getQuantity() != null 
                               || request.getDirectUnitCost() != null 
                               || request.getComment() != null;

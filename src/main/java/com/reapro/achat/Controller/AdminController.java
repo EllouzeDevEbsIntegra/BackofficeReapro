@@ -2,7 +2,7 @@ package com.reapro.achat.Controller;
 
 import com.reapro.achat.DTO.*;
 import com.reapro.achat.services.AdminService;
-import jakarta.validation.Valid;
+import com.reapro.achat.services.ParameterService; // Import
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -11,12 +11,18 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import jakarta.validation.Valid;
+import java.util.Map;
+
 @RestController
 @RequestMapping("/api/admins")
 @RequiredArgsConstructor
 public class AdminController {
 
     private final AdminService adminService;
+    private final ParameterService parameterService; // Import
+
+    // ... (toutes les autres méthodes restent identiques)
 
     // ──────────────────────────────────────────────────────────────
     // Routes accessibles à TOUS les utilisateurs connectés (ADMIN + USER)
@@ -83,5 +89,19 @@ public class AdminController {
             @RequestBody UpdateMyCompanyRequest request
     ) {
         return adminService.updateMyCompany(email, request);
+    }
+
+    // ✅ NOUVEL ENDPOINT TEMPORAIRE POUR METTRE À JOUR UN PARAMÈTRE
+    @PreAuthorize("hasAuthority('ROLE_ADMIN')")
+    @PostMapping("/update-parameter")
+    @ResponseStatus(HttpStatus.OK)
+    public String updateParameter(@RequestBody Map<String, String> payload) {
+        String key = payload.get("key");
+        String value = payload.get("value");
+        if (key == null || value == null) {
+            return "Veuillez fournir 'key' et 'value' dans le corps de la requête.";
+        }
+        parameterService.updateValue(key, value);
+        return "Paramètre '" + key + "' mis à jour avec la valeur '" + value + "'.";
     }
 }

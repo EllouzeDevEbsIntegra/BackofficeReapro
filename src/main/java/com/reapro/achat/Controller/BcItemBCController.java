@@ -4,6 +4,8 @@ import com.reapro.achat.DTO.BcItemEnrichedResponse;
 import com.reapro.achat.DTO.PagedResponse;
 import com.reapro.achat.DTO.bc.BcItemBC;
 import com.reapro.achat.DTO.bc.SiItemCategory;
+import com.reapro.achat.DTO.bc.BcManufacturer;
+import com.reapro.achat.services.BcManufacturerService;
 import com.reapro.achat.services.BcItemBCService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -16,6 +18,7 @@ import java.util.List;
 public class BcItemBCController {
 
     private final BcItemBCService service;
+    private final BcManufacturerService manufacturerService;
 
     @GetMapping("/itemsEqv")
     public PagedResponse<BcItemEnrichedResponse> getItems(
@@ -44,5 +47,12 @@ public class BcItemBCController {
             @RequestParam(defaultValue = "20C5337E-2E49-EC11-A103-00155DB6A301") String companyId
     ) {
         return service.getItemCategories(companyId, indentation, parentCategory);
+    }
+
+    @GetMapping("/manufacturers")
+    public List<BcManufacturer> getManufacturers(
+            @RequestParam(defaultValue = "20C5337E-2E49-EC11-A103-00155DB6A301") String companyId
+    ) {
+        return manufacturerService.getManufacturers(companyId);
     }
 }

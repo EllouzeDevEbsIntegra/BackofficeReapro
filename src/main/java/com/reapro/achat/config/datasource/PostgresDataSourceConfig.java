@@ -14,6 +14,7 @@ import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
 
+import org.springframework.jdbc.core.JdbcTemplate;
 import javax.sql.DataSource;
 import java.util.HashMap;
 import java.util.Map;
@@ -32,6 +33,12 @@ public class PostgresDataSourceConfig {
     @ConfigurationProperties(prefix = "spring.datasource.primary")
     public DataSource primaryDataSource() {
         return DataSourceBuilder.create().build();
+    }
+
+    @Primary
+    @Bean(name = "jdbcTemplate")
+    public JdbcTemplate jdbcTemplate(@Qualifier("primaryDataSource") DataSource dataSource) {
+        return new JdbcTemplate(dataSource);
     }
 
     @Primary

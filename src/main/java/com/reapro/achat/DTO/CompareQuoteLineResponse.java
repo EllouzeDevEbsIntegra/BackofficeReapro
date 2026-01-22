@@ -15,7 +15,7 @@ public class CompareQuoteLineResponse {
     private LocalDateTime creationDate;
     private Integer pageNumber;
     private String structuredDescription;
-    private Integer countItemManual;
+    // private Integer countItemManual; // Removed as requested
     private Integer nbLineNotThreated;
     private Boolean treated;
     private String itemProductCode;

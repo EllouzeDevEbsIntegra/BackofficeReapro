@@ -13,7 +13,16 @@ public enum ErrorCode {
     // Erreurs Paramètres
     PARAMETER_NOT_FOUND(3001, HttpStatus.NOT_FOUND, "Paramètre introuvable"),
 
-    // Autres erreurs (tu pourras en ajouter d'autres ici)
+    // Erreurs Commandes / Panier
+    ORDER_NOT_FOUND(5001, HttpStatus.NOT_FOUND, "Commande ou panier introuvable"),
+    ORDER_NOT_DRAFT(5002, HttpStatus.BAD_REQUEST, "Le panier n'est pas modifiable car il n'est plus en brouillon"),
+    ORDER_LINE_NOT_FOUND(5003, HttpStatus.NOT_FOUND, "Ligne de commande introuvable"),
+    INVALID_QUANTITY(5004, HttpStatus.BAD_REQUEST, "Quantité invalide"),
+    STOCK_INSUFFICIENT(5005, HttpStatus.BAD_REQUEST, "Stock insuffisant"),
+    ORDER_EMPTY(5006, HttpStatus.BAD_REQUEST, "Le panier est vide"),
+    ITEM_NOT_FOUND(5007, HttpStatus.NOT_FOUND, "Article introuvable"),
+
+    // Autres erreurs
     INTERNAL_ERROR(1000, HttpStatus.INTERNAL_SERVER_ERROR, "Erreur interne du serveur"),
     RESOURCE_NOT_FOUND(1002, HttpStatus.NOT_FOUND, "Ressource introuvable");
 

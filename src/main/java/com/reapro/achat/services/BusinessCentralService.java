@@ -54,7 +54,6 @@ public class BusinessCentralService {
 
     /**
      * GET sur une API CUSTOM (extension)
-     * ex: {customBase}/companies(ID)/quoteLines?$filter=...
      */
     public <T> T getCustom(String endpoint,
                            String companyId,
@@ -67,7 +66,6 @@ public class BusinessCentralService {
 
     /**
      * GET sur une API STANDARD (Microsoft)
-     * ex: {standardBase}/companies(ID)/items?$filter=...
      */
     public <T> T getStandard(String endpoint,
                              String companyId,
@@ -96,8 +94,24 @@ public class BusinessCentralService {
     }
 
     /**
+     * POST sur API STANDARD (Microsoft)
+     */
+    public <T, R> R postStandard(String endpoint,
+                               String companyId,
+                               T body,
+                               Class<R> responseType) {
+        String url = buildUrl(standardBase(), companyId, endpoint, null);
+        log.info("BC POST Standard URL = {}", url);
+        try {
+            log.info("BC POST Body: {}", objectMapper.writeValueAsString(body));
+        } catch (Exception e) {
+            log.warn("Could not serialize POST body for logging", e);
+        }
+        return execute(getClient().post().uri(url).bodyValue(body), responseType, "POST Standard");
+    }
+
+    /**
      * PATCH sur une API CUSTOM (extension)
-     * ex: companies(ID)/quoteLines(<id>)
      */
     public <T> T patchCustom(String endpoint,
                              String companyId,
@@ -118,19 +132,16 @@ public class BusinessCentralService {
             }
         }
 
-        // 1) Construction de la requête PATCH (RequestBodySpec)
         WebClient.RequestBodySpec bodySpec = getClient()
                 .patch()
                 .uri(url)
                 .header(HttpHeaders.IF_MATCH, ifMatch)
                 .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE);
 
-        // 2) Application éventuelle du body → RequestHeadersSpec
         WebClient.RequestHeadersSpec<?> spec = (body != null)
                 ? bodySpec.bodyValue(body)
                 : bodySpec;
 
-        // 3) Exécution générique
         return execute(spec, responseType, "PATCH Custom");
     }
 
@@ -165,6 +176,14 @@ public class BusinessCentralService {
                     .bodyToMono(responseType)
                     .timeout(Duration.ofMillis(parameterService.getIntValue(ParameterService.BC_TIMEOUT, 30000)))
                     .block();
+        } catch (org.springframework.web.reactive.function.client.WebClientResponseException e) {
+            String responseBody = e.getResponseBodyAsString();
+            log.error("Erreur BC {} (Status {}): Body={}", operation, e.getStatusCode(), responseBody);
+            throw new ApiException(
+                    ErrorCode.BC_API_ERROR,
+                    "Erreur communication Business Central : " + responseBody,
+                    e
+            );
         } catch (Exception e) {
             log.error("Erreur BC {} : {}", operation, e.getMessage());
             throw new ApiException(

@@ -8,5 +8,6 @@ import java.util.Optional;
 @Repository
 public interface AppParameterRepository extends JpaRepository<AppParameter, Long> {
     Optional<AppParameter> findByParamKeyAndActiveTrue(String paramKey);
+    Optional<AppParameter> findByParamKey(String paramKey); // NOUVEAU
     boolean existsByParamKey(String paramKey);
 }

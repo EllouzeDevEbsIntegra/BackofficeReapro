@@ -5,6 +5,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.web.reactive.function.client.ExchangeStrategies;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.client.RestTemplate; // Import added
 import reactor.netty.http.client.HttpClient;
 
 import java.time.Duration;
@@ -29,5 +30,10 @@ public class RestClientConfig {
         return WebClient.builder()
                 .clientConnector(new ReactorClientHttpConnector(httpClient))
                 .exchangeStrategies(strategies);
+    }
+
+    @Bean
+    public RestTemplate restTemplate() {
+        return new RestTemplate();
     }
 }

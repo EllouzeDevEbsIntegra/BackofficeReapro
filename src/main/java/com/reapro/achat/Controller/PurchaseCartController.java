@@ -1,11 +1,12 @@
 package com.reapro.achat.Controller;
 
-import com.reapro.achat.DTO.bc.BcListResponse;
 import com.reapro.achat.DTO.bc.PurchaseCartLineBC;
 import com.reapro.achat.DTO.bc.PurchaseCartLineCreateRequest;
 import com.reapro.achat.DTO.bc.PurchaseCartLineUpdateRequest;
 import com.reapro.achat.services.PurchaseCartService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -19,12 +20,15 @@ public class PurchaseCartController {
     private final PurchaseCartService purchaseCartService;
 
     @GetMapping
-    public ResponseEntity<BcListResponse<PurchaseCartLineBC>> getPurchaseCartLines(
+    public ResponseEntity<Page<PurchaseCartLineBC>> getPurchaseCartLines(
             @RequestParam(defaultValue = "20C5337E-2E49-EC11-A103-00155DB6A301") String companyId,
             @RequestParam(required = false) String compareQuoteNo,
-            @RequestParam(required = false) String status) {
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String vendorNo,
+            @RequestParam(required = false) String itemNo, // Added itemNo
+            Pageable pageable) {
 
-        BcListResponse<PurchaseCartLineBC> response = purchaseCartService.getPurchaseCartLines(companyId, compareQuoteNo, status);
+        Page<PurchaseCartLineBC> response = purchaseCartService.getPurchaseCartLines(companyId, compareQuoteNo, status, vendorNo, itemNo, pageable);
         return ResponseEntity.ok(response);
     }
     

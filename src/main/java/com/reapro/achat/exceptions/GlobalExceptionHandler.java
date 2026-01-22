@@ -4,12 +4,31 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import com.reapro.achat.DTO.ApiErrorResponse;
+import com.reapro.achat.DTO.salesorder.StockValidationErrorResponse;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.web.server.ResponseStatusException;
 
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    @ExceptionHandler(ApiException.class)
+    public ResponseEntity<ApiErrorResponse> handleApiException(ApiException ex) {
+        ApiErrorResponse body = ApiErrorResponse.builder()
+                .status(ex.getErrorCode().getHttpStatus().value())
+                .message(ex.getMessage() != null ? ex.getMessage() : ex.getErrorCode().getDefaultMessage())
+                .build();
+        return ResponseEntity.status(ex.getErrorCode().getHttpStatus()).body(body);
+    }
+
+    @ExceptionHandler(StockValidationException.class)
+    public ResponseEntity<StockValidationErrorResponse> handleStockValidationException(StockValidationException ex) {
+        StockValidationErrorResponse response = StockValidationErrorResponse.builder()
+                .message(ex.getMessage())
+                .invalidLines(ex.getInvalidLines())
+                .build();
+        return ResponseEntity.badRequest().body(response);
+    }
 
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<ApiErrorResponse> handleResponseStatus(ResponseStatusException ex) {

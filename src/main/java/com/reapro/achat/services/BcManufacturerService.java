@@ -4,11 +4,13 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.reapro.achat.DTO.bc.BcListResponse;
 import com.reapro.achat.DTO.bc.BcManufacturer;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -34,10 +36,17 @@ public class BcManufacturerService {
                 BcManufacturerListResponse.class
         );
 
-        return resp != null && resp.getValue() != null ? resp.getValue() : Collections.emptyList();
+        List<BcManufacturer> list = resp != null && resp.getValue() != null ? new ArrayList<>(resp.getValue()) : new ArrayList<>();
+        list.sort((a, b) -> {
+            String nameA = a.getName() != null ? a.getName() : "";
+            String nameB = b.getName() != null ? b.getName() : "";
+            return nameA.compareToIgnoreCase(nameB);
+        });
+        return list;
     }
 
     @Data
+    @EqualsAndHashCode(callSuper = false)
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class BcManufacturerListResponse extends BcListResponse<BcManufacturer> {}
 }

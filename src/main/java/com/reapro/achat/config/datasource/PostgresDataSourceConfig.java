@@ -48,7 +48,12 @@ public class PostgresDataSourceConfig {
             @Qualifier("primaryDataSource") DataSource dataSource) {
 
         Map<String, Object> properties = new HashMap<>();
-        properties.put("hibernate.hbm2ddl.auto", "update");
+        // Important: keep schema changes out of Hibernate auto-update.
+        // We now depend on materialized views (search_opportunity_mv) over primary tables;
+        // hbm2ddl "update" may attempt ALTER COLUMN and fails with PostgreSQL:
+        // "cannot alter type of a column used by a view or rule".
+        // Use SQL migrations/manual DDL for schema evolution.
+        properties.put("hibernate.hbm2ddl.auto", "validate");
         properties.put("hibernate.dialect", "org.hibernate.dialect.PostgreSQLDialect");
 
         return builder

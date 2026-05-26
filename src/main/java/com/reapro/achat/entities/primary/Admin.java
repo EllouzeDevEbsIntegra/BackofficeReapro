@@ -30,10 +30,12 @@ public class Admin {
 
     private String password;
 
+    @Builder.Default
     private boolean active = true;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
+    @Builder.Default
     private Role role = Role.ROLE_ADMIN;
 
     // ✅ NOUVEAU : Société BC de l'utilisateur

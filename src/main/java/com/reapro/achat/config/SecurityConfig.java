@@ -22,6 +22,10 @@ public class SecurityConfig {
         // Désactiver CSRF pour les API REST
         http.csrf(csrf -> csrf.disable());
 
+        // Désactiver le formulaire de login par défaut et l'authentification Basic
+        http.formLogin(form -> form.disable());
+        http.httpBasic(basic -> basic.disable());
+
         // Pas de session → 100% JWT
         http.sessionManagement(session ->
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
@@ -39,7 +43,9 @@ public class SecurityConfig {
                                 "/api/auth/change-password",
                                 "/auth/refresh-token",
                                 "/api/version",
-                                "/api/elva-items/sync"
+                                "/api/elva-items/sync",
+                                "/api/v1/sync-adaptable",
+                                "/error"
                         ).permitAll()
 
                         // Toutes les autres routes → protégées

@@ -36,8 +36,9 @@ public class SalesOrderSyncBatch {
     public void syncValidatedOrdersWithBusinessCentral() {
         log.info("Démarrage du batch de synchronisation des commandes avec Business Central : {}", LocalDateTime.now());
 
-        // Récupérer les commandes validées qui ont un numéro BC
-        List<SalesOrder> ordersToSync = salesOrderRepository.findByStatusAndBusinessCentralOrderNumberIsNotNull(OrderStatus.VALIDATED);
+        // Récupérer les commandes validées qui ont un numéro BC (créées localement).
+        List<SalesOrder> ordersToSync = salesOrderRepository
+                .findByStatusAndBusinessCentralOrderNumberIsNotNull(OrderStatus.VALIDATED);
 
         if (ordersToSync.isEmpty()) {
             log.info("Aucune commande à synchroniser.");

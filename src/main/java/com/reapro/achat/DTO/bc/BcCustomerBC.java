@@ -26,6 +26,9 @@ public class BcCustomerBC {
     @JsonProperty("blocked")
     private String blocked;
 
+    @JsonProperty("taxRegistrationNumber")
+    private String taxRegistrationNumber;
+
     @JsonProperty("address")
     private BcCustomerAddress address;
 

@@ -22,6 +22,9 @@ public class TecDocArticle {
     // Nouveau champ pour stocker les constructeurs de véhicules liés
     private List<VehicleManufacturer> linkedVehicles;
 
+    // Nouveau champ pour stocker les composants du kit TecDoc
+    private List<?> articleParts;
+
     @Data
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class VehicleManufacturer {

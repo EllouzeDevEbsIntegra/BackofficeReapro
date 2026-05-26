@@ -21,6 +21,7 @@ public enum ErrorCode {
     STOCK_INSUFFICIENT(5005, HttpStatus.BAD_REQUEST, "Stock insuffisant"),
     ORDER_EMPTY(5006, HttpStatus.BAD_REQUEST, "Le panier est vide"),
     ITEM_NOT_FOUND(5007, HttpStatus.NOT_FOUND, "Article introuvable"),
+    CLIENT_ID_REQUIRED(5008, HttpStatus.BAD_REQUEST, "Le clientId est obligatoire pour cette opération"), // Nouveau
 
     // Autres erreurs
     INTERNAL_ERROR(1000, HttpStatus.INTERNAL_SERVER_ERROR, "Erreur interne du serveur"),

@@ -4,6 +4,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -25,4 +26,13 @@ public class Customer {
 
     @Column(name = "phone")
     private String phone;
+
+    @Transient
+    private String email;
+
+    @Transient
+    private String taxRegistrationNumber;
+
+    @Transient
+    private String city;
 }

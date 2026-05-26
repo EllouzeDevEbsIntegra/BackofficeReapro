@@ -108,6 +108,13 @@ public class ParameterService {
                 ? decode(param.getParamValue())
                 : param.getParamValue();
     }
+    
+    // Pour les clés qui n'existent pas forcément au démarrage et qui peuvent avoir une valeur par défaut
+    public String getValue(String key, String defaultValue) {
+        return parameterRepository.findByParamKeyAndActiveTrue(key)
+                .map(param -> param.isEncrypted() ? decode(param.getParamValue()) : param.getParamValue())
+                .orElse(defaultValue);
+    }
 
     public int getIntValue(String key, int defaultValue) {
         try {
@@ -120,11 +127,13 @@ public class ParameterService {
     // ✅ NOUVELLE MÉTHODE DE MISE À JOUR
     @CacheEvict(value = "bcParameters", key = "#key") // Vider le cache pour cette clé
     public void updateValue(String key, String newValue) {
-        AppParameter param = parameterRepository.findByParamKey(key)
-                .orElseThrow(() -> new ApiException(
-                        ErrorCode.PARAMETER_NOT_FOUND,
-                        "Paramètre introuvable : " + key
-                ));
+        AppParameter param = parameterRepository.findByParamKey(key).orElse(null);
+                
+        if (param == null) {
+            // Créer le paramètre s'il n'existe pas lors de l'update
+            createIfNotExists(key, newValue, "Auto-created param", "SYSTEM", false);
+            return;
+        }
 
         if (param.isEncrypted()) {
             param.setParamValue(encode(newValue));

@@ -63,6 +63,7 @@ public class SalesOrder {
     private BigDecimal totalDiscount;
 
     @OneToMany(mappedBy = "salesOrder", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    @Builder.Default
     private List<SalesOrderLine> lines = new ArrayList<>();
 
     @PrePersist

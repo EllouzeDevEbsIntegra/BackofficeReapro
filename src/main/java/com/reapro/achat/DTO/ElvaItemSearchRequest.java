@@ -1,10 +1,14 @@
 package com.reapro.achat.DTO;
 
+import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 @Data
 public class ElvaItemSearchRequest {
-    private String searchTerm; // Champ générique pour la recherche multi-critères
+    @NotBlank(message = "Le clientId est obligatoire pour récupérer les prix spécifiques.")
+    private String clientId; // Devenu obligatoire
+
+    private String searchTerm;
     private String no;
     private String description;
     private String searchDescription;

@@ -23,11 +23,13 @@ public class ItemLedgerEntryBCController {
     @GetMapping
     public ItemLedgerEntryPageResponse getItemLedgerEntries(
             @RequestParam String itemNo,
-            @RequestParam int year,
+            @RequestParam(required = false, defaultValue = "0") int year,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size,
-            @RequestParam(defaultValue = "20C5337E-2E49-EC11-A103-00155DB6A301") String companyId
+            @RequestParam(defaultValue = "20C5337E-2E49-EC11-A103-00155DB6A301") String companyId,
+            @RequestParam(required = false) String sourceNo,
+            @RequestParam(required = false, defaultValue = "false") boolean allYears
     ) {
-        return service.getItemLedgerEntriesByItemAndYear(companyId, itemNo, year, page, size);
+        return service.getItemLedgerEntriesByItemAndYear(companyId, itemNo, year, page, size, sourceNo, allYears);
     }
 }

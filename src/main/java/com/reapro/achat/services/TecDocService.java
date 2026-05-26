@@ -30,7 +30,10 @@ public class TecDocService {
                 if (supplierId != null) article.setSupplierLogoUrl(fetchSupplierLogoUrl(supplierId));
                 if (article.getGenericArticles() != null && !article.getGenericArticles().isEmpty()) {
                     Long legacyId = article.getGenericArticles().get(0).getLegacyArticleId();
-                    if (legacyId != null) article.setLinkedVehicles(fetchLinkedVehicles(legacyId));
+                    if (legacyId != null) {
+                        article.setLinkedVehicles(fetchLinkedVehicles(legacyId));
+                        article.setArticleParts(fetchArticleParts(legacyId));
+                    }
                 }
             }
         }
@@ -63,6 +66,49 @@ public class TecDocService {
                 }
             }
         } catch (Exception e) { log.warn("Erreur fetchLinkedVehicles: {}", e.getMessage()); }
+        return Collections.emptyList();
+    }
+
+    private List<Map<String, Object>> fetchArticleParts(Long legacyArticleId) {
+        String url = parameterService.getValue(ParameterService.TECDOC_API_URL);
+        String apiKey = parameterService.getValue(ParameterService.TECDOC_API_KEY);
+        String country = parameterService.getValue(ParameterService.TECDOC_COUNTRY);
+        Long providerId = Long.parseLong(parameterService.getValue(ParameterService.TECDOC_PROVIDER));
+
+        Map<String, Object> requestBody = Map.of("getArticlePartList", Map.of(
+                "articleCountry", country, "articleId", legacyArticleId,
+                "lang", "FR", "provider", providerId));
+
+        try {
+            Map<?, ?> response = webClientBuilder.build().post().uri(url).header("api-key", apiKey)
+                    .bodyValue(requestBody).retrieve().bodyToMono(Map.class).block();
+
+            if (response != null && response.get("data") instanceof Map<?, ?> data) {
+                if (data.get("array") instanceof List<?> array && !array.isEmpty()) {
+                    Object firstItem = array.get(0);
+                    if (firstItem instanceof Map<?, ?> itemMap) {
+                        if (itemMap.get("partlistInfo") instanceof Map<?, ?> partlistInfo) {
+                            if (partlistInfo.get("array") instanceof List<?> partsList) {
+                                List<Map<String, Object>> result = new ArrayList<>();
+                                for (Object partWrapper : partsList) {
+                                    if (partWrapper instanceof Map<?, ?> wrapperMap) {
+                                        if (wrapperMap.get("partlistDetails") instanceof Map<?, ?> details) {
+                                            Map<String, Object> cleanPart = new HashMap<>();
+                                            cleanPart.put("articleNo", details.get("articleNo"));
+                                            cleanPart.put("articleName", details.get("articleName"));
+                                            cleanPart.put("brandName", details.get("brandName"));
+                                            cleanPart.put("quantity", details.get("quantity"));
+                                            result.add(cleanPart);
+                                        }
+                                    }
+                                }
+                                return result;
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) { log.warn("Erreur fetchArticleParts: {}", e.getMessage()); }
         return Collections.emptyList();
     }
 

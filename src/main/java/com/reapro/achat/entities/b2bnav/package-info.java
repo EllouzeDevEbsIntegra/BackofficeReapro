@@ -1,1 +1,4 @@
-// This is a placeholder file to create the directory.
+/**
+ * Entities mapped from B2B NAV datasource.
+ */
+package com.reapro.achat.entities.b2bnav;

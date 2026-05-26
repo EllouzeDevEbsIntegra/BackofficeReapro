@@ -10,6 +10,7 @@ import com.reapro.achat.DTO.bc.SiItemCategory;
 import com.reapro.achat.entities.sqlserver.LastInvoicedItemCost;
 import com.reapro.achat.repositories.sqlserver.LastInvoicedItemCostRepository;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -198,7 +199,13 @@ public class BcItemBCService {
         }
         
         SiItemCategoryListResponse resp = bcService.getCustom("SiItemCategory", companyId, params, SiItemCategoryListResponse.class);
-        return (resp != null && resp.getValue() != null) ? resp.getValue() : List.of();
+        List<SiItemCategory> list = (resp != null && resp.getValue() != null) ? new ArrayList<>(resp.getValue()) : new ArrayList<>();
+        list.sort((a, b) -> {
+            String descA = a.getDescription() != null ? a.getDescription() : "";
+            String descB = b.getDescription() != null ? b.getDescription() : "";
+            return descA.compareToIgnoreCase(descB);
+        });
+        return list;
     }
 
     private String buildFilter(String referenceMaster, String noNe) {
@@ -218,6 +225,7 @@ public class BcItemBCService {
     }
 
     @Data
+    @EqualsAndHashCode(callSuper = false)
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class BcItemListResponse extends BcListResponse<BcItemBC> {}
 
@@ -229,6 +237,7 @@ public class BcItemBCService {
     }
 
     @Data
+    @EqualsAndHashCode(callSuper = false)
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class SiItemCategoryListResponse extends BcListResponse<SiItemCategory> {}
 }

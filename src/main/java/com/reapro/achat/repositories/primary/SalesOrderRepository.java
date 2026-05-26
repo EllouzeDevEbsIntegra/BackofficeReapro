@@ -29,4 +29,7 @@ public interface SalesOrderRepository extends JpaRepository<SalesOrder, Long>, J
 
     // Pour l'historique filtré par statut
     Page<SalesOrder> findByCreatedByAndStatusOrderByCreatedAtDesc(Admin createdBy, OrderStatus status, Pageable pageable);
+
+    // Pour la vérification idempotente lors de l'import historique BC
+    boolean existsByBusinessCentralOrderNumber(String businessCentralOrderNumber);
 }

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.reapro.achat.DTO.bc.BcCompanyBC;
 import com.reapro.achat.DTO.bc.BcListResponse;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -37,6 +38,7 @@ public class BcCompanyService {
     }
 
     @Data
+    @EqualsAndHashCode(callSuper = false)
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class BcCompanyListResponse extends BcListResponse<BcCompanyBC> {}
 }

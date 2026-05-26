@@ -27,6 +27,9 @@ public class CacheConfig {
     // ✅ Nouveau cache pour la structure des kits
     public static final String KITS_STRUCTURE      = "kitsStructure";
 
+    // ✅ Nouveau cache pour les exclusions de recherche
+    public static final String EXCLUSION_LIST      = "exclusionList";
+
     @Bean
     public CacheManager cacheManager() {
         SimpleCacheManager manager = new SimpleCacheManager();
@@ -75,7 +78,16 @@ public class CacheConfig {
                         .build()
         );
 
-        manager.setCaches(List.of(ledgerPage, ledgerRecap, bcParameters, bcManufacturers, kitsStructure));
+        // Cache pour les exclusions (TTL très long, vidé manuellement lors d'un ajout/suppression)
+        CaffeineCache exclusionList = new CaffeineCache(
+                EXCLUSION_LIST,
+                Caffeine.newBuilder()
+                        .expireAfterWrite(24, TimeUnit.HOURS)
+                        .maximumSize(10) // Contient un seul gros Set
+                        .build()
+        );
+
+        manager.setCaches(List.of(ledgerPage, ledgerRecap, bcParameters, bcManufacturers, kitsStructure, exclusionList));
         return manager;
     }
 }

@@ -47,7 +47,7 @@ public class SalesOrderService {
         
         return salesOrderRepository.findByCreatedByAndClientIdAndStatus(admin, clientId, OrderStatus.DRAFT)
                 .map(this::mapToResponse)
-                .orElseThrow(() -> new ApiException(ErrorCode.ORDER_NOT_FOUND, "Aucun panier brouillon trouvé pour ce client."));
+                .orElse(null);
     }
 
     @Transactional
@@ -92,6 +92,9 @@ public class SalesOrderService {
                     "Quantité cumulée (" + newQuantity + ") dépasse le stock disponible (" + stock + ") pour '" + request.getReference() + "'.");
             }
             line.setQuantity(newQuantity);
+            if (request.getUnitPrice() != null) {
+                line.setUnitPrice(request.getUnitPrice());
+            }
         } else {
             line = SalesOrderLine.builder()
                     .salesOrder(order)
@@ -100,7 +103,7 @@ public class SalesOrderService {
                     .brand(itemInfo.getBrand())
                     .unit(itemInfo.getUnit())
                     .quantity(request.getQuantity())
-                    .unitPrice(itemInfo.getUnitPrice())
+                    .unitPrice(request.getUnitPrice() != null ? request.getUnitPrice() : itemInfo.getUnitPrice())
                     .availableStock(stock)
                     .status(OrderStatus.DRAFT)
                     .discountPercent(BigDecimal.ZERO)

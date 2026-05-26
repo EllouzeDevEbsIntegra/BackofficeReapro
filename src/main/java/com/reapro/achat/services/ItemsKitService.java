@@ -13,6 +13,7 @@ import com.reapro.achat.entities.sqlserver.LastInvoicedItemCost;
 import com.reapro.achat.repositories.primary.AdminRepository;
 import com.reapro.achat.repositories.sqlserver.LastInvoicedItemCostRepository;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.Cacheable;
@@ -259,6 +260,7 @@ public class ItemsKitService {
     }
 
     @Data
+    @EqualsAndHashCode(callSuper = false)
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class BcItemsListResponse extends BcListResponse<BcItemBC> {}
 }

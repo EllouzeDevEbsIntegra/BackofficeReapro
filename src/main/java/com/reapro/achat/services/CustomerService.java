@@ -66,6 +66,9 @@ public class CustomerService {
                     c.setExtId(bcCust.getNumber());
                     c.setCompanyName(bcCust.getDisplayName());
                     c.setPhone(bcCust.getPhoneNumber() != null ? bcCust.getPhoneNumber() : "");
+                    c.setEmail(bcCust.getEmail() != null ? bcCust.getEmail() : "");
+                    c.setTaxRegistrationNumber(bcCust.getTaxRegistrationNumber() != null ? bcCust.getTaxRegistrationNumber() : "");
+                    c.setCity(bcCust.getAddress() != null && bcCust.getAddress().getCity() != null ? bcCust.getAddress().getCity() : "");
                     
                     if (bcCust.getAddress() != null) {
                         StringBuilder sb = new StringBuilder();

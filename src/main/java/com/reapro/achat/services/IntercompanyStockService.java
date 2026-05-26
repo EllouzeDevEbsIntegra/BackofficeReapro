@@ -8,6 +8,7 @@ import com.reapro.achat.DTO.bc.BcListResponse;
 import com.reapro.achat.entities.primary.Admin;
 import com.reapro.achat.repositories.primary.AdminRepository;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -95,6 +96,7 @@ public class IntercompanyStockService {
     }
 
     @Data
+    @EqualsAndHashCode(callSuper = false)
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class BcItemStockListResponse extends BcListResponse<BcItemStockBC> {}
 }

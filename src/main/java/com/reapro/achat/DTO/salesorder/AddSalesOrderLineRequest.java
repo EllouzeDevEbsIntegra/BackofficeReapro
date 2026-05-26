@@ -11,4 +11,6 @@ public class AddSalesOrderLineRequest {
 
     @Min(1)
     private int quantity;
+
+    private java.math.BigDecimal unitPrice;
 }

@@ -1,1 +1,4 @@
-// This is a placeholder file to create the directory.
+/**
+ * Business Central related services.
+ */
+package com.reapro.achat.services.bc;

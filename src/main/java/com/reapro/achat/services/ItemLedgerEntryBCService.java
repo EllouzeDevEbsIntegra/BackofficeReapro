@@ -31,13 +31,89 @@ public class ItemLedgerEntryBCService {
     // ------------------------------------------------------------
     // Cache PAGE : une entrée par (companyId, itemNo, year, page, size)
     // ------------------------------------------------------------
+    public ItemLedgerEntryPageResponse getItemLedgerEntriesByItemAndYear(
+            String companyId,
+            String itemNo,
+            int year,
+            int page,
+            int size
+    ) {
+        return getItemLedgerEntriesByItemAndYear(companyId, itemNo, year, page, size, null, false);
+    }
+
+    public ItemLedgerEntryPageResponse getItemLedgerEntriesByItemAndYear(
+            String companyId,
+            String itemNo,
+            int year,
+            int page,
+            int size,
+            String sourceNo,
+            boolean allYears
+    ) {
+        // Si filtrage client → pas de cache (données trop spécifiques)
+        if (sourceNo != null && !sourceNo.isBlank()) {
+            return fetchFromBcDirectly(companyId, itemNo, year, page, size, sourceNo, allYears);
+        }
+        // Sinon, déléguer à la méthode cachée
+        ItemLedgerEntryBCService self = ApplicationContextProvider.getBean(ItemLedgerEntryBCService.class);
+        return self.getItemLedgerEntriesByItemAndYearCached(companyId, itemNo, year, page, size);
+    }
+
+    private ItemLedgerEntryPageResponse fetchFromBcDirectly(
+            String companyId, String itemNo, int year, int page, int size,
+            String sourceNo, boolean allYears) {
+
+        if (page < 0) page = 0;
+        if (size <= 0) size = 50;
+        int skip = page * size;
+
+        StringBuilder filterSb = new StringBuilder();
+        filterSb.append(String.format("ItemNo eq '%s'", escapeODataString(itemNo)));
+        filterSb.append(" and EntryType ne 'Transfer'");
+
+        if (!allYears && year > 0) {
+            LocalDate start = LocalDate.of(year, 1, 1);
+            LocalDate end = start.plusYears(1);
+            filterSb.append(String.format(" and PostingDate ge %s and PostingDate lt %s", start, end));
+        }
+
+        if (sourceNo != null && !sourceNo.isBlank()) {
+            filterSb.append(String.format(" and SourceNo eq '%s'", escapeODataString(sourceNo)));
+        }
+
+        Map<String, String> params = new LinkedHashMap<>();
+        params.put("$filter", filterSb.toString());
+        params.put("$orderby", "PostingDate desc");
+        params.put("$top", String.valueOf(size));
+        params.put("$skip", String.valueOf(skip));
+        params.put("$count", "true");
+
+        BcPageResponse pageResponse = bcService.getCustom(BC_ENDPOINT, companyId, params, BcPageResponse.class);
+
+        List<ItemLedgerEntryBC> bcList = (pageResponse != null && pageResponse.value != null)
+                ? pageResponse.value : Collections.emptyList();
+
+        long totalElements = (pageResponse != null && pageResponse.count != null)
+                ? pageResponse.count : bcList.size();
+
+        int totalPages = size > 0 ? (int) Math.ceil((double) totalElements / size) : 1;
+
+        List<ItemLedgerEntryResponse> content = bcList.stream().map(this::toResponse).collect(Collectors.toList());
+
+        // Recap (total par type)
+        Map<String, BigDecimal> recap = computeQuantityRecapByEntryType(companyId, filterSb.toString());
+
+        return new ItemLedgerEntryPageResponse(content, page, size, totalElements, totalPages, recap);
+    }
+
+    // Méthode cachée originale (sans client)
     @Cacheable(
             cacheNames = CacheConfig.LEDGER_PAGE,
             key = "T(String).valueOf(#companyId).trim().toLowerCase() + '|' + " +
                     "T(String).valueOf(#itemNo).trim().toLowerCase() + '|' + " +
                     "#year + '|' + #page + '|' + #size + '|noTransfer'"
     )
-    public ItemLedgerEntryPageResponse getItemLedgerEntriesByItemAndYear(
+    public ItemLedgerEntryPageResponse getItemLedgerEntriesByItemAndYearCached(
             String companyId,
             String itemNo,
             int year,
@@ -52,7 +128,6 @@ public class ItemLedgerEntryBCService {
 
         int skip = page * size;
 
-        // Filtre année par plage (BC n'aime pas year(PostingDate))
         LocalDate start = LocalDate.of(year, 1, 1);
         LocalDate end = start.plusYears(1);
 
@@ -61,7 +136,6 @@ public class ItemLedgerEntryBCService {
                 escapeODataString(itemNo), start, end
         );
 
-        // 1) Appel BC paginé pour content
         Map<String, String> params = new LinkedHashMap<>();
         params.put("$filter", filter);
         params.put("$orderby", "PostingDate desc");
@@ -69,40 +143,22 @@ public class ItemLedgerEntryBCService {
         params.put("$skip", String.valueOf(skip));
         params.put("$count", "true");
 
-        BcPageResponse pageResponse = bcService.getCustom(
-                BC_ENDPOINT,
-                companyId,
-                params,
-                BcPageResponse.class
-        );
+        BcPageResponse pageResponse = bcService.getCustom(BC_ENDPOINT, companyId, params, BcPageResponse.class);
 
         List<ItemLedgerEntryBC> bcList = (pageResponse != null && pageResponse.value != null)
-                ? pageResponse.value
-                : Collections.emptyList();
+                ? pageResponse.value : Collections.emptyList();
 
         long totalElements = (pageResponse != null && pageResponse.count != null)
-                ? pageResponse.count
-                : bcList.size();
+                ? pageResponse.count : bcList.size();
 
         int totalPages = size > 0 ? (int) Math.ceil((double) totalElements / size) : 1;
 
-        List<ItemLedgerEntryResponse> content = bcList.stream()
-                .map(this::toResponse)
-                .collect(Collectors.toList());
+        List<ItemLedgerEntryResponse> content = bcList.stream().map(this::toResponse).collect(Collectors.toList());
 
-        // 2) ✅ Recap global : maintenant caché séparément
-        // Important : appel via proxy Spring (sinon @Cacheable ignoré)
         ItemLedgerEntryBCService self = ApplicationContextProvider.getBean(ItemLedgerEntryBCService.class);
         Map<String, BigDecimal> quantityByEntryType = self.getRecapQuantityByEntryTypeCached(companyId, itemNo, year);
 
-        return new ItemLedgerEntryPageResponse(
-                content,
-                page,
-                size,
-                totalElements,
-                totalPages,
-                quantityByEntryType
-        );
+        return new ItemLedgerEntryPageResponse(content, page, size, totalElements, totalPages, quantityByEntryType);
     }
 
     // ------------------------------------------------------------

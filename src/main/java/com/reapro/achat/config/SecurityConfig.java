@@ -19,14 +19,14 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
 
-        // Désactiver CSRF pour les API REST
+        // DÃ©sactiver CSRF pour les API REST
         http.csrf(csrf -> csrf.disable());
 
-        // Désactiver le formulaire de login par défaut et l'authentification Basic
+        // DÃ©sactiver le formulaire de login par dÃ©faut et l'authentification Basic
         http.formLogin(form -> form.disable());
         http.httpBasic(basic -> basic.disable());
 
-        // Pas de session → 100% JWT
+        // Pas de session â†’ 100% JWT
         http.sessionManagement(session ->
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
         );
@@ -45,10 +45,12 @@ public class SecurityConfig {
                                 "/api/version",
                                 "/api/elva-items/sync",
                                 "/api/v1/sync-adaptable",
+                                "/api/v1/sync-adaptable/sync",
+                                "/api/v1/sync-adaptable/sync-status",
                                 "/error"
                         ).permitAll()
 
-                        // Toutes les autres routes → protégées
+                        // Toutes les autres routes â†’ protÃ©gÃ©es
                         .anyRequest().authenticated()
         );
 
@@ -58,3 +60,4 @@ public class SecurityConfig {
         return http.build();
     }
 }
+

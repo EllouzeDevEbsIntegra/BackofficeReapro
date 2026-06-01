@@ -25,11 +25,11 @@ public class PostgresIndexInitializer implements ApplicationRunner {
             jdbcTemplate.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm");
             log.info("PostgreSQL pg_trgm extension verified/created.");
 
-            // 2. Créer l'index GIN trigramme sur la colonne 'no'
+            // 2. CrÃ©er l'index GIN trigramme sur la colonne 'no'
             jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_elva_item_cache_no_trgm ON elva_item_cache USING gin (no gin_trgm_ops)");
             log.info("GIN trigram index on 'no' verified/created.");
 
-            // 3. Créer l'index GIN trigramme sur la colonne 'search_description'
+            // 3. CrÃ©er l'index GIN trigramme sur la colonne 'search_description'
             jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_elva_item_cache_search_desc_trgm ON elva_item_cache USING gin (search_description gin_trgm_ops)");
             log.info("GIN trigram index on 'search_description' verified/created.");
 
@@ -37,7 +37,7 @@ public class PostgresIndexInitializer implements ApplicationRunner {
             jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_elva_item_cache_ref_compact_erp ON elva_item_cache ((CASE WHEN LOWER(COALESCE(produit, '')) IN ('true','1','t','yes','y') THEN REPLACE(UPPER(REPLACE(no, ' ', '')), 'MASTER', '') ELSE UPPER(REPLACE(no, ' ', '')) END))");
             log.info("Expression index for ERP compact reference verified/created.");
 
-            // 5. Vue matérialisée des opportunités (tri score global sans recalcul à chaque requête)
+            // 5. Vue matÃ©rialisÃ©e des opportunitÃ©s (tri score global sans recalcul Ã  chaque requÃªte)
             jdbcTemplate.execute("""
                     CREATE MATERIALIZED VIEW IF NOT EXISTS search_opportunity_mv AS
                     SELECT
@@ -79,3 +79,4 @@ public class PostgresIndexInitializer implements ApplicationRunner {
         }
     }
 }
+

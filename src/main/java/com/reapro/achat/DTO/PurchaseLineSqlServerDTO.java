@@ -19,4 +19,5 @@ public class PurchaseLineSqlServerDTO {
     private String description;
     private BigDecimal quantity;
     private BigDecimal outstandingQuantity;
+    private BigDecimal qtyFirstConfirmation;
 }

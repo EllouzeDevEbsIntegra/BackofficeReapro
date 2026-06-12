@@ -1,6 +1,8 @@
 package com.reapro.achat.repositories.sqlserver;
 
 import com.reapro.achat.entities.sqlserver.LastInvoicedItemCost;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
@@ -15,4 +17,7 @@ public interface LastInvoicedItemCostRepository extends JpaRepository<LastInvoic
 
     // Pour ton endpoint /api/last-invoiced-cost?itemNo=...
     List<LastInvoicedItemCost> findByNoOrderByLastInvoicedCostDateDesc(String no);
+
+    // Surcharge paginée pour le dialog "Historique Der P" (/api/sqlserver/last-invoiced-item-costs/{itemNo})
+    Page<LastInvoicedItemCost> findByNoOrderByLastInvoicedCostDateDesc(String no, Pageable pageable);
 }

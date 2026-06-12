@@ -3,6 +3,7 @@ package com.reapro.achat.services;
 import com.reapro.achat.DTO.bc.BcListResponse;
 import com.reapro.achat.DTO.bc.QuoteLineBC;
 import com.reapro.achat.DTO.bc.QuoteLineUpdateRequest;
+import com.reapro.achat.util.BcLineFilter;
 import com.reapro.achat.exceptions.ApiException;
 import com.reapro.achat.exceptions.ErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -13,9 +14,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -43,7 +48,168 @@ public class QuoteLineBCService {
         return response != null ? response.getValue() : Collections.emptyList();
     }
 
+    /** Opérateurs de comparaison OData autorisés (whitelist anti-injection). */
+    private static final Set<String> ALLOWED_OPERATORS = Set.of("gt", "ge", "eq", "le", "lt");
+
+    /** Format de date attendu : yyyy-MM-dd (Edm.Date). */
+    private static final java.util.regex.Pattern ISO_DATE = java.util.regex.Pattern.compile("\\d{4}-\\d{2}-\\d{2}");
+
+    private boolean isValidOperator(String op) {
+        return op != null && ALLOWED_OPERATORS.contains(op);
+    }
+
+    /** Applique l'opérateur de comparaison sur le résultat d'un compareTo. */
+    private boolean applyOperator(int cmp, String op) {
+        switch (op) {
+            case "gt": return cmp > 0;
+            case "ge": return cmp >= 0;
+            case "eq": return cmp == 0;
+            case "le": return cmp <= 0;
+            case "lt": return cmp < 0;
+            default:   return true;
+        }
+    }
+
+    /** Filtre numérique (availableInventory, quantity). Pas de filtre => true. Champ null + filtre actif => false. */
+    private boolean matchesNumber(BigDecimal fieldValue, String operator, BigDecimal filterValue) {
+        if (filterValue == null || !isValidOperator(operator)) return true;
+        if (fieldValue == null) return false;
+        return applyOperator(fieldValue.compareTo(filterValue), operator);
+    }
+
+    /** Filtre date (dateDernierAchat). Exclut les dates sentinelles (0001-01-01 / 1753-...) quand un filtre est actif. */
+    private boolean matchesDate(LocalDate fieldValue, String operator, String filterValueIso) {
+        if (filterValueIso == null || !isValidOperator(operator)
+                || !ISO_DATE.matcher(filterValueIso.trim()).matches()) {
+            return true;
+        }
+        if (fieldValue == null) return false;
+        // Dates "vides" de BC -> exclues dès qu'un filtre date est demandé
+        if (fieldValue.getYear() <= 1753) return false;
+        LocalDate filterDate;
+        try {
+            filterDate = LocalDate.parse(filterValueIso.trim());
+        } catch (Exception e) {
+            return true; // valeur invalide -> filtre ignoré
+        }
+        return applyOperator(fieldValue.compareTo(filterDate), operator);
+    }
+
+    /**
+     * GET : lignes de devis d'un comparateur (sans ReferenceMaster), triées par "no" croissant.
+     *
+     * IMPORTANT : availableInventory et dateDernierAchat sont des champs calculés (FlowFields)
+     * que Business Central N'APPLIQUE PAS dans un $filter OData (ignorés silencieusement),
+     * contrairement à quantity. Pour garantir un résultat correct, on récupère TOUTES les lignes
+     * du comparateur (OData ne filtre que CompareQuoteNo, fiable), on applique les filtres
+     * (stock/date/quantity) EN JAVA, on trie par "no", PUIS on pagine en Java.
+     * Ainsi le filtrage est bien appliqué AVANT la pagination finale renvoyée au front.
+     *
+     * Opérateurs autorisés : gt(>), ge(>=), eq(=), le(<=), lt(<). Opérateur invalide => filtre ignoré.
+     */
+    public PagedQuoteLines getQuoteLinesByCompareQuote(
+            String companyId, String compareQuoteNo, int page, int size,
+            String stockOperator, BigDecimal stockValue,
+            String dateDernierAchatOperator, String dateDernierAchatValue,
+            String quantityOperator, BigDecimal quantityValue,
+            String qtyFirstConfirmationOperator, BigDecimal qtyFirstConfirmationValue,
+            String referenceOperator, String referenceValue) {
+
+        int safeSize = size > 0 ? size : 20;
+        int safePage = Math.max(page, 0);
+
+        // 1) Récupération de TOUTES les lignes du comparateur (filtre OData fiable : CompareQuoteNo)
+        Map<String, String> params = new java.util.HashMap<>();
+        params.put("$filter", String.format("CompareQuoteNo eq '%s'", compareQuoteNo));
+        params.put("$orderby", "no asc");
+
+        BcListResponseWrapper response = bcService.getCustom(
+                "quoteLines",
+                companyId,
+                params,
+                BcListResponseWrapper.class
+        );
+
+        List<QuoteLineBC> all = (response != null && response.getValue() != null)
+                ? response.getValue()
+                : Collections.emptyList();
+
+        // 2) Filtrage Java (availableInventory / dateDernierAchat / quantity)
+        List<QuoteLineBC> filtered = new ArrayList<>();
+        for (QuoteLineBC line : all) {
+            if (matchesNumber(line.getAvailableInventory(), stockOperator, stockValue)
+                    && matchesDate(line.getDateDernierAchat(), dateDernierAchatOperator, dateDernierAchatValue)
+                    && matchesNumber(line.getQuantity(), quantityOperator, quantityValue)
+                    && matchesNumber(line.getQtyFirstConfirmation(), qtyFirstConfirmationOperator, qtyFirstConfirmationValue)
+                    && BcLineFilter.matchesReference(line.getNo(), referenceOperator, referenceValue)) {
+                filtered.add(line);
+            }
+        }
+
+        // 3) Tri stable par "no" croissant
+        filtered.sort(Comparator.comparing(l -> l.getNo() == null ? "" : l.getNo()));
+
+        // 4) Pagination Java (après filtrage). On expose AUSSI le total réel (avant pagination)
+        //    pour que le frontend puisse afficher le badge "total de lignes" et calculer hasMore.
+        int totalElements = filtered.size();
+        int totalPages = (totalElements == 0) ? 0 : (int) Math.ceil((double) totalElements / safeSize);
+
+        // Nombre distinct de N° DP (documentNo) sur la liste FILTRÉE COMPLÈTE (avant pagination)
+        // → badge "DP" du header FRS. null/blank ignorés, trim appliqué.
+        long distinctDocumentCount = filtered.stream()
+                .map(QuoteLineBC::getDocumentNo)
+                .filter(d -> d != null && !d.trim().isEmpty())
+                .map(String::trim)
+                .distinct()
+                .count();
+
+        int from = safePage * safeSize;
+        List<QuoteLineBC> content;
+        if (from >= totalElements) {
+            content = Collections.emptyList();
+            log.info("[ConfirmationAchat] compareQuoteNo={} total={} filtered={} page={} -> 0 ligne",
+                    compareQuoteNo, all.size(), totalElements, safePage);
+        } else {
+            int to = Math.min(from + safeSize, totalElements);
+            content = new ArrayList<>(filtered.subList(from, to));
+            log.info("[ConfirmationAchat] compareQuoteNo={} total={} filtered={} page={} size={} -> {} ligne(s)",
+                    compareQuoteNo, all.size(), totalElements, safePage, safeSize, (to - from));
+        }
+
+        return new PagedQuoteLines(content, totalElements, safePage, safeSize, totalPages, distinctDocumentCount);
+    }
+
     public static class BcListResponseWrapper extends BcListResponse<QuoteLineBC> {}
+
+    /**
+     * Réponse paginée des lignes FRS du comparateur.
+     * Structure alignée sur les endpoints EQV/KIT (content + totalElements + totalPages)
+     * afin que le frontend exploite totalElements pour le badge et la pagination au scroll.
+     */
+    public static class PagedQuoteLines {
+        private final List<QuoteLineBC> content;
+        private final long totalElements;
+        private final int page;
+        private final int size;
+        private final int totalPages;
+        private final long distinctDocumentCount;
+
+        public PagedQuoteLines(List<QuoteLineBC> content, long totalElements, int page, int size, int totalPages, long distinctDocumentCount) {
+            this.content = content;
+            this.totalElements = totalElements;
+            this.page = page;
+            this.size = size;
+            this.totalPages = totalPages;
+            this.distinctDocumentCount = distinctDocumentCount;
+        }
+
+        public List<QuoteLineBC> getContent() { return content; }
+        public long getTotalElements() { return totalElements; }
+        public int getPage() { return page; }
+        public int getSize() { return size; }
+        public int getTotalPages() { return totalPages; }
+        public long getDistinctDocumentCount() { return distinctDocumentCount; }
+    }
 
 
     // ================== PATCH AVEC GESTION ETag CÔTÉ BACKEND ==================

@@ -9,6 +9,7 @@ import com.reapro.achat.DTO.bc.PurchaseCartLineBC;
 import com.reapro.achat.DTO.bc.SiItemCategory;
 import com.reapro.achat.entities.sqlserver.LastInvoicedItemCost;
 import com.reapro.achat.repositories.sqlserver.LastInvoicedItemCostRepository;
+import com.reapro.achat.util.BcLineFilter;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.RequiredArgsConstructor;
@@ -17,6 +18,7 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -33,58 +35,65 @@ public class BcItemBCService {
             String noNe,
             int page,
             int size,
-            String compareQuoteNo
+            String compareQuoteNo,
+            String stockOperator,
+            BigDecimal stockValue,
+            String dateDernierAchatOperator,
+            String dateDernierAchatValue,
+            String referenceOperator,
+            String referenceValue
     ) {
         if (page < 0) page = 0;
         if (size <= 0) size = 20;
 
-        // 1. Récupérer le total (count) pour la pagination correcte
-        long totalElements = countItems(companyId, referenceMaster, noNe);
-        int totalPages = (int) Math.ceil((double) totalElements / size);
+        // 1) Récupérer + enrichir TOUTES les équivalences. Le filtre "Dernier achat" porte sur
+        //    lastInvoicedCostDate (donnée ENRICHIE en Java, non filtrable côté BC) => on filtre
+        //    ET on pagine côté Java (cohérent avec FRS / KIT).
+        List<BcItemEnrichedResponse> all = loadItemsEqvAll(companyId, referenceMaster, noNe, compareQuoteNo);
 
-        if (totalElements == 0) {
-            return new PagedResponse<>(List.of(), page, size, 0, 0);
+        // 2) Filtres Java (stock = qtyStock, dernier achat = lastInvoicedCostDate) AVANT pagination
+        List<BcItemEnrichedResponse> filtered = all.stream()
+                .filter(e -> BcLineFilter.matchesNumber(
+                                e.getItem() != null ? e.getItem().getQtyStock() : null, stockOperator, stockValue)
+                        && BcLineFilter.matchesDate(
+                                e.getLastInvoicedCostDate(), dateDernierAchatOperator, dateDernierAchatValue)
+                        && BcLineFilter.matchesReference(
+                                e.getItem() != null ? e.getItem().getNo() : null, referenceOperator, referenceValue))
+                .collect(Collectors.toList());
+
+        // 2ter) Totaux de synthèse CMD (qtyOnPurchOrder) / IMPORT (qtyImport) sur la liste FILTRÉE
+        //       COMPLÈTE (avant pagination) — pour les badges du header EQV.
+        BigDecimal totalCmd = BigDecimal.ZERO;
+        BigDecimal totalImp = BigDecimal.ZERO;
+        for (BcItemEnrichedResponse e : filtered) {
+            if (e.getItem() != null) {
+                if (e.getItem().getQtyOnPurchOrder() != null) totalCmd = totalCmd.add(e.getItem().getQtyOnPurchOrder());
+                if (e.getItem().getQtyImport() != null) totalImp = totalImp.add(e.getItem().getQtyImport());
+            }
         }
 
-        // 2. Récupérer la page demandée directement depuis BC (Trié et Paginé)
-        List<BcItemEnrichedResponse> content = loadItemsEqvPage(
-                companyId, referenceMaster, noNe, compareQuoteNo, page, size
-        );
-
-        return new PagedResponse<>(content, page, size, totalElements, totalPages);
+        // 3) Pagination locale (totalElements = total filtré)
+        long totalElements = filtered.size();
+        int totalPages = (totalElements == 0) ? 0 : (int) Math.ceil((double) totalElements / size);
+        int from = page * size;
+        if (from >= filtered.size()) {
+            return new PagedResponse<>(List.of(), page, size, totalElements, totalPages, totalCmd, totalImp);
+        }
+        int to = Math.min(from + size, filtered.size());
+        return new PagedResponse<>(filtered.subList(from, to), page, size, totalElements, totalPages, totalCmd, totalImp);
     }
 
-    private long countItems(String companyId, String referenceMaster, String noNe) {
-        String filter = buildFilter(referenceMaster, noNe);
-        Map<String, String> params = new HashMap<>();
-        params.put("$filter", filter);
-        params.put("$top", "0");
-        params.put("$count", "true");
-
-        BcItemListResponse resp = bcService.getCustom("bcItems", companyId, params, BcItemListResponse.class);
-        return getCountFromBc(companyId, params);
-    }
-
-    private long getCountFromBc(String companyId, Map<String, String> params) {
-        BcCountResponse resp = bcService.getCustom("bcItems", companyId, params, BcCountResponse.class);
-        return resp != null && resp.getCount() != null ? resp.getCount() : 0;
-    }
-
-    private List<BcItemEnrichedResponse> loadItemsEqvPage(
+    private List<BcItemEnrichedResponse> loadItemsEqvAll(
             String companyId,
             String referenceMaster,
             String noNe,
-            String compareQuoteNo,
-            int page,
-            int size
+            String compareQuoteNo
     ) {
-        // 1) Appel BC Paginé
+        // 1) Appel BC : TOUTES les équivalences (tri conservé, pas de $top/$skip => filtrage Java ensuite)
         String filter = buildFilter(referenceMaster, noNe);
         Map<String, String> params = new LinkedHashMap<>();
         params.put("$filter", filter);
         params.put("$orderby", "lastPurshCostDS desc, no asc"); // Tri demandé
-        params.put("$top", String.valueOf(size));
-        params.put("$skip", String.valueOf(page * size));
         params.put("$select",
                 "id,vendorNo,VendorItemNo, manufacturerTecdocId,no,ReferenceMaster,descriptionStructured," +
                         "qtyStock,qtyImport,qtyOnPurchOrder,totalVendu,totalAchete," +

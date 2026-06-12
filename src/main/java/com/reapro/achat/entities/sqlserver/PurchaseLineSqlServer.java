@@ -40,4 +40,7 @@ public class PurchaseLineSqlServer {
 
     @Column(name = "Outstanding Quantity")
     private BigDecimal outstandingQuantity;
+
+    @Column(name = "Qty First Confirmation")
+    private BigDecimal qtyFirstConfirmation;
 }

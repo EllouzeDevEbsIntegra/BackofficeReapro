@@ -12,6 +12,7 @@ import com.reapro.achat.entities.primary.Admin;
 import com.reapro.achat.entities.sqlserver.LastInvoicedItemCost;
 import com.reapro.achat.repositories.primary.AdminRepository;
 import com.reapro.achat.repositories.sqlserver.LastInvoicedItemCostRepository;
+import com.reapro.achat.util.BcLineFilter;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.RequiredArgsConstructor;
@@ -54,7 +55,13 @@ public class ItemsKitService {
             String no,
             int page,
             int size,
-            String compareQuoteNo
+            String compareQuoteNo,
+            String stockOperator,
+            BigDecimal stockValue,
+            String dateDernierAchatOperator,
+            String dateDernierAchatValue,
+            String referenceOperator,
+            String referenceValue
     ) {
         if (no == null || no.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Le paramètre 'no' est obligatoire.");
@@ -77,17 +84,38 @@ public class ItemsKitService {
 
         List<BcItemEnrichedResponse> all = loadItemsKitRaw(companyId, no.trim(), compareQuoteNo);
 
-        // 3) pagination locale
-        long totalElements = all.size();
+        // 2bis) Filtres Java (stock = qtyStock, dernier achat = lastInvoicedCostDate) AVANT pagination
+        List<BcItemEnrichedResponse> filtered = all.stream()
+                .filter(e -> BcLineFilter.matchesNumber(
+                                e.getItem() != null ? e.getItem().getQtyStock() : null, stockOperator, stockValue)
+                        && BcLineFilter.matchesDate(
+                                e.getLastInvoicedCostDate(), dateDernierAchatOperator, dateDernierAchatValue)
+                        && BcLineFilter.matchesReference(
+                                e.getItem() != null ? e.getItem().getNo() : null, referenceOperator, referenceValue))
+                .collect(Collectors.toList());
+
+        // 2ter) Totaux de synthèse CMD (qtyOnPurchOrder) / IMPORT (qtyImport) sur la liste FILTRÉE
+        //       COMPLÈTE (avant pagination) — pour les badges du header KIT.
+        BigDecimal totalCmd = BigDecimal.ZERO;
+        BigDecimal totalImp = BigDecimal.ZERO;
+        for (BcItemEnrichedResponse e : filtered) {
+            if (e.getItem() != null) {
+                if (e.getItem().getQtyOnPurchOrder() != null) totalCmd = totalCmd.add(e.getItem().getQtyOnPurchOrder());
+                if (e.getItem().getQtyImport() != null) totalImp = totalImp.add(e.getItem().getQtyImport());
+            }
+        }
+
+        // 3) pagination locale (sur la liste filtrée => totalElements = total filtré)
+        long totalElements = filtered.size();
         int totalPages = (int) Math.ceil((double) totalElements / size);
 
         int from = page * size;
-        if (from >= all.size()) {
-            return new PagedResponse<>(List.of(), page, size, totalElements, totalPages);
+        if (from >= filtered.size()) {
+            return new PagedResponse<>(List.of(), page, size, totalElements, totalPages, totalCmd, totalImp);
         }
-        int to = Math.min(from + size, all.size());
+        int to = Math.min(from + size, filtered.size());
 
-        return new PagedResponse<>(all.subList(from, to), page, size, totalElements, totalPages);
+        return new PagedResponse<>(filtered.subList(from, to), page, size, totalElements, totalPages, totalCmd, totalImp);
     }
 
     public List<BcItemEnrichedResponse> loadItemsKitRaw(String companyId, String no, String compareQuoteNo) {

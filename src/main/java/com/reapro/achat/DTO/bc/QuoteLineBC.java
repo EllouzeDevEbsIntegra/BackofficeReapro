@@ -1,5 +1,6 @@
 package com.reapro.achat.DTO.bc;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
@@ -84,6 +85,13 @@ public class QuoteLineBC {
 
     @JsonProperty("qtyOnPurchOrder")
     private BigDecimal qtyOnPurchOrder;
+
+    // Champ ajouté directement dans l'API BC custom quoteLines (field "QtyFirstConfirmation").
+    // Sérialisé vers le frontend en "qtyFirstConfirmation" ; @JsonAlias tolère la casse BC
+    // réelle ("QtyFirstConfirmation" ou "qtyFirstConfirmation") en désérialisation.
+    @JsonProperty("qtyFirstConfirmation")
+    @JsonAlias({"QtyFirstConfirmation"})
+    private BigDecimal qtyFirstConfirmation;
 
     @JsonProperty("lastDirectUnitCostCalculated")
     private BigDecimal lastDirectUnitCostCalculated;

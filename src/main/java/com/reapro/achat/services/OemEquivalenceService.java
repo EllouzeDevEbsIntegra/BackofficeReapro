@@ -32,16 +32,24 @@ public class OemEquivalenceService {
     }
 
     public OemCountDetailsResponseDTO calculateOemCountWithDetails(String masterItemNo) {
+        log.info("[OEM Count] Calculating OEM count with details for masterItemNo: '{}'", masterItemNo);
         List<String> equivalentOemReferences = getEquivalentOemReferences(masterItemNo);
+        log.info("[OEM Count] Found {} equivalent OEM references in SQL Server for masterItemNo '{}': {}", 
+                equivalentOemReferences.size(), masterItemNo, equivalentOemReferences);
 
         List<OemCountDetailDTO> details = equivalentOemReferences.stream()
-                .map(ref -> new OemCountDetailDTO(ref, getOemCountFromApi(ref)))
+                .map(ref -> {
+                    int count = getOemCountFromApi(ref);
+                    log.info("[OEM Count] External OEM API count for reference '{}' is: {}", ref, count);
+                    return new OemCountDetailDTO(ref, count);
+                })
                 .collect(Collectors.toList());
 
         int totalCount = details.stream()
                 .mapToInt(OemCountDetailDTO::getCount)
                 .sum();
 
+        log.info("[OEM Count] Total OEM count calculated for masterItemNo '{}': {}", masterItemNo, totalCount);
         return new OemCountDetailsResponseDTO(totalCount, details);
     }
 

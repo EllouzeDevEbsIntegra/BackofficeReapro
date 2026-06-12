@@ -31,6 +31,7 @@ public class PurchaseLineSqlServerService {
         dto.setDescription(entity.getDescription());
         dto.setQuantity(entity.getQuantity());
         dto.setOutstandingQuantity(entity.getOutstandingQuantity());
+        dto.setQtyFirstConfirmation(entity.getQtyFirstConfirmation());
         return dto;
     }
 }

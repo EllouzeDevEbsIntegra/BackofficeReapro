@@ -10,6 +10,7 @@ import com.reapro.achat.services.BcItemBCService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 @RestController
@@ -27,9 +28,17 @@ public class BcItemBCController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(defaultValue = "20C5337E-2E49-EC11-A103-00155DB6A301") String companyId,
-            @RequestParam(required = false) String compareQuoteNo
+            @RequestParam(required = false) String compareQuoteNo,
+            @RequestParam(required = false) String stockOperator,
+            @RequestParam(required = false) BigDecimal stockValue,
+            @RequestParam(required = false) String dateDernierAchatOperator,
+            @RequestParam(required = false) String dateDernierAchatValue,
+            @RequestParam(required = false) String referenceOperator,
+            @RequestParam(required = false) String referenceValue
     ) {
-        return service.getItemsByReferenceAndNotNoSortedLocally(companyId, referenceMaster, no, page, size, compareQuoteNo);
+        return service.getItemsByReferenceAndNotNoSortedLocally(companyId, referenceMaster, no, page, size, compareQuoteNo,
+                stockOperator, stockValue, dateDernierAchatOperator, dateDernierAchatValue,
+                referenceOperator, referenceValue);
     }
 
     @PatchMapping("/itemsEqv/{no}/toVerify")

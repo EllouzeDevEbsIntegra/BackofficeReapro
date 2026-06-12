@@ -35,6 +35,38 @@ public class QuoteLineBCController {
     }
 
     /**
+     * GET : lignes de devis d'un comparateur, filtrées par CompareQuoteNo (sans ReferenceMaster),
+     * triées par "no" croissant, paginées (page/size). Filtres optionnels stock / dateDernierAchat / quantity
+     * appliqués côté BC AVANT la pagination. Utilisé par l'écran Confirmation Achat.
+     */
+    @GetMapping("/by-compare-quote")
+    public QuoteLineBCService.PagedQuoteLines getQuoteLinesByCompareQuote(
+            @RequestParam String compareQuoteNo,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String stockOperator,
+            @RequestParam(required = false) BigDecimal stockValue,
+            @RequestParam(required = false) String dateDernierAchatOperator,
+            @RequestParam(required = false) String dateDernierAchatValue,
+            @RequestParam(required = false) String quantityOperator,
+            @RequestParam(required = false) BigDecimal quantityValue,
+            @RequestParam(required = false) String qtyFirstConfirmationOperator,
+            @RequestParam(required = false) BigDecimal qtyFirstConfirmationValue,
+            @RequestParam(required = false) String referenceOperator,
+            @RequestParam(required = false) String referenceValue,
+            @RequestParam(defaultValue = "20C5337E-2E49-EC11-A103-00155DB6A301") String companyId
+    ) {
+        // Réponse paginée { content, totalElements, totalPages, page, size }
+        return service.getQuoteLinesByCompareQuote(
+                companyId, compareQuoteNo, page, size,
+                stockOperator, stockValue,
+                dateDernierAchatOperator, dateDernierAchatValue,
+                quantityOperator, quantityValue,
+                qtyFirstConfirmationOperator, qtyFirstConfirmationValue,
+                referenceOperator, referenceValue);
+    }
+
+    /**
      * PATCH : mise à jour d'une ligne de devis.
      */
     @PatchMapping("/{id}")

@@ -7,6 +7,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
+
 @RestController
 @RequestMapping("/api/itemsKit")
 @RequiredArgsConstructor
@@ -24,8 +26,16 @@ public class ItemsKitController {
             @RequestParam String no,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
-            @RequestParam(required = false) String compareQuoteNo
+            @RequestParam(required = false) String compareQuoteNo,
+            @RequestParam(required = false) String stockOperator,
+            @RequestParam(required = false) BigDecimal stockValue,
+            @RequestParam(required = false) String dateDernierAchatOperator,
+            @RequestParam(required = false) String dateDernierAchatValue,
+            @RequestParam(required = false) String referenceOperator,
+            @RequestParam(required = false) String referenceValue
     ) {
-        return service.getItemsKit(email, no, page, size, compareQuoteNo);
+        return service.getItemsKit(email, no, page, size, compareQuoteNo,
+                stockOperator, stockValue, dateDernierAchatOperator, dateDernierAchatValue,
+                referenceOperator, referenceValue);
     }
 }

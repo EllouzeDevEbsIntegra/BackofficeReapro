@@ -37,6 +37,9 @@ public class ItemLedgerEntryBC {
     @JsonProperty("Quantity")
     private BigDecimal quantity;
 
+    @JsonProperty("RemainingQuantity")
+    private BigDecimal remainingQuantity;
+
     @JsonProperty("UnitofMeasureCode")
     private String unitOfMeasureCode;
 

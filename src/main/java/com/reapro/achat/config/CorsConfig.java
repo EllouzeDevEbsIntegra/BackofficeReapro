@@ -17,7 +17,13 @@ public class CorsConfig {
         CorsConfiguration config = new CorsConfiguration();
 
         // IMPORTANT: Utilisez setAllowedOriginPatterns au lieu de setAllowedOrigins
-        config.setAllowedOriginPatterns(Arrays.asList("http://localhost:5173"));
+        // (compatible avec allowCredentials(true), contrairement à "*").
+        config.setAllowedOriginPatterns(Arrays.asList(
+                "http://localhost:5173",
+                "http://127.0.0.1:5173",
+                "http://localhost:5180",
+                "http://127.0.0.1:5180"
+        ));
 
         // Autoriser les headers nécessaires
         config.setAllowedHeaders(Arrays.asList("*"));

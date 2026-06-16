@@ -2,6 +2,8 @@ package com.reapro.achat.services;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.reapro.achat.DTO.ImportLedgerLinePageResponse;
+import com.reapro.achat.DTO.ImportLedgerLineResponse;
 import com.reapro.achat.DTO.ItemLedgerEntryPageResponse;
 import com.reapro.achat.DTO.ItemLedgerEntryResponse;
 import com.reapro.achat.DTO.bc.ItemLedgerEntryBC;
@@ -185,6 +187,93 @@ public class ItemLedgerEntryBCService {
 
         // éviter de renvoyer une map mutable depuis le cache
         return Collections.unmodifiableMap(new LinkedHashMap<>(sums));
+    }
+
+    // ------------------------------------------------------------
+    // Lignes IMPORT : écritures item-ledger en magasin d'import (RemainingQuantity > 0)
+    // pour un article + fournisseur. Réutilise la MÊME base BC custom (specificItemLedgerEntries).
+    // Filtres BC fixes : ItemNo + isImportLocation eq true + RemainingQuantity gt 0 + SourceNo.
+    // Pas de cache (filtré par fournisseur, données spécifiques) — comme le filtrage par sourceNo.
+    // ------------------------------------------------------------
+    // Colonnes Import autorisées au tri (whitelist) → on n'injecte JAMAIS une colonne brute dans $orderby.
+    private static final java.util.Set<String> IMPORT_SORT_WHITELIST = java.util.Set.of(
+            "DocumentNo", "SourceNo", "SourceName", "LocationCode",
+            "PostingDate", "Quantity", "RemainingQuantity", "CostAmountExpected"
+    );
+
+    /** Construit un $orderby sûr à partir de "field,dir". Défaut = "PostingDate desc". */
+    private String buildImportOrderBy(String sort) {
+        String field = "PostingDate";
+        String dir = "desc";
+        if (sort != null && !sort.isBlank()) {
+            String[] parts = sort.split(",");
+            String requested = parts[0].trim();
+            String canonical = IMPORT_SORT_WHITELIST.stream()
+                    .filter(w -> w.equalsIgnoreCase(requested))
+                    .findFirst()
+                    .orElse(null);
+            if (canonical != null) {
+                field = canonical;
+                String d = (parts.length > 1) ? parts[1].trim().toLowerCase() : "asc";
+                dir = ("asc".equals(d) || "desc".equals(d)) ? d : "desc";
+            }
+        }
+        return field + " " + dir;
+    }
+
+    public ImportLedgerLinePageResponse getImportLedgerLines(
+            String companyId,
+            String itemNo,
+            String sourceNo,
+            int page,
+            int size,
+            String sort
+    ) {
+        if (page < 0) page = 0;
+        if (size <= 0) size = 50;
+        int skip = page * size;
+
+        StringBuilder filterSb = new StringBuilder();
+        filterSb.append(String.format("ItemNo eq '%s'", escapeODataString(itemNo)));
+        filterSb.append(" and isImportLocation eq true");
+        filterSb.append(" and RemainingQuantity gt 0");
+        filterSb.append(String.format(" and SourceNo eq '%s'", escapeODataString(sourceNo)));
+
+        Map<String, String> params = new LinkedHashMap<>();
+        params.put("$filter", filterSb.toString());
+        params.put("$orderby", buildImportOrderBy(sort));   // whitelist + défaut PostingDate desc
+        params.put("$top", String.valueOf(size));
+        params.put("$skip", String.valueOf(skip));
+        params.put("$count", "true");
+
+        BcPageResponse pageResponse = bcService.getCustom(BC_ENDPOINT, companyId, params, BcPageResponse.class);
+
+        List<ItemLedgerEntryBC> bcList = (pageResponse != null && pageResponse.value != null)
+                ? pageResponse.value : Collections.emptyList();
+
+        long totalElements = (pageResponse != null && pageResponse.count != null)
+                ? pageResponse.count : bcList.size();
+
+        int totalPages = size > 0 ? (int) Math.ceil((double) totalElements / size) : 1;
+
+        List<ImportLedgerLineResponse> content = bcList.stream()
+                .map(this::toImportLineResponse)
+                .collect(Collectors.toList());
+
+        return new ImportLedgerLinePageResponse(content, page, size, totalElements, totalPages);
+    }
+
+    private ImportLedgerLineResponse toImportLineResponse(ItemLedgerEntryBC e) {
+        return new ImportLedgerLineResponse(
+                e.getDocumentNo(),
+                e.getSourceNo(),
+                e.getSourceName(),
+                e.getLocationCode(),
+                e.getPostingDate(),
+                e.getQuantity(),
+                e.getRemainingQuantity(),
+                e.getCostAmountExpected()
+        );
     }
 
     private ItemLedgerEntryResponse toResponse(ItemLedgerEntryBC e) {

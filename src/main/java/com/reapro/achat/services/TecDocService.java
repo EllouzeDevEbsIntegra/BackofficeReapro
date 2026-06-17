@@ -401,6 +401,42 @@ public class TecDocService {
         params.put("includeGTINs", true);
         params.put("includeArticleCriteria", true);
 
+        // NB : pas de facette fabricants sur getArticles (non documentée par Pegasus et absente
+        // de la réponse runtime). Le filtre fabricant s'appuie exclusivement sur la liste GLOBALE
+        // getBrands (getDataSuppliers / GET /api/tecdoc/data-suppliers) + le param dataSupplierIds.
         return callTecDoc("getArticles", params);
+    }
+
+    /**
+     * Liste GLOBALE des fabricants / fournisseurs TecDoc (référence getBrands, NON scopée à une
+     * recherche). Sert de source au filtre fabricant quand la facette serveur n'est pas disponible.
+     * On renvoie une liste légère {dataSupplierId, mfrName} (sans logos/adresses).
+     */
+    @SuppressWarnings("unchecked")
+    public List<Map<String, Object>> getDataSuppliers() {
+        Map<String, Object> params = new HashMap<>();
+        params.put("articleCountry", country());
+        params.put("lang", LANG);
+        params.put("provider", providerId());
+        Map<String, Object> resp = callTecDoc("getBrands", params);
+
+        Object data = resp.get("data");
+        Object array = (data instanceof Map) ? ((Map<String, Object>) data).get("array") : null;
+        List<Map<String, Object>> out = new ArrayList<>();
+        if (array instanceof List) {
+            for (Object o : (List<?>) array) {
+                if (o instanceof Map) {
+                    Map<String, Object> b = (Map<String, Object>) o;
+                    Object id = b.get("dataSupplierId");
+                    Object name = b.get("mfrName");
+                    if (id == null || name == null) continue;
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("dataSupplierId", id);
+                    m.put("mfrName", name);
+                    out.add(m);
+                }
+            }
+        }
+        return out;
     }
 }

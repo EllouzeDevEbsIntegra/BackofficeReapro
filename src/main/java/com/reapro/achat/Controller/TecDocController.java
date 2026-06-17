@@ -95,6 +95,12 @@ public class TecDocController {
         return tecDocService.getVehicleTypes(type, mfrId, modelSeriesId, clampPage(page), clampPerPage(perPage));
     }
 
+    /** Liste globale des fabricants/fournisseurs TecDoc (référence, non scopée à une recherche). */
+    @GetMapping("/data-suppliers")
+    public List<Map<String, Object>> getDataSuppliers() {
+        return tecDocService.getDataSuppliers();
+    }
+
     /** Familles / sous-familles (arbre assembly groups) pour un véhicule. */
     @GetMapping("/assembly-groups")
     public Map<String, Object> getAssemblyGroups(

@@ -785,22 +785,32 @@ public class PartslinkScraperService {
     }
 
     private List<ScrapedGroup> extractMainGroups(WebDriver driver) {
+        // Multi-marques : on récupère par ligne idValue / descriptionValue / captionValue (innerText),
+        // puis on délègue le format au PartslinkGroupParser (BMW idValue+desc ; Audi/VW/Mercedes caption).
         if (driver instanceof RemoteWebDriver) {
             try {
-                List<Map<String, String>> results = (List<Map<String, String>>) ((RemoteWebDriver) driver).executeScript(
+                List<Map<String, String>> rows = (List<Map<String, String>>) ((RemoteWebDriver) driver).executeScript(
                     "return Array.from(document.querySelectorAll('[data-test-id=\"mainGroupsTable\"] [data-test-id=\"row\"]')).map(row => {" +
-                    "    const codeEl = row.querySelector('[data-test-id=\"idValue\"] span');" +
-                    "    const nameEl = row.querySelector('[data-test-id=\"descriptionValue\"] span');" +
+                    "    const id = row.querySelector('[data-test-id=\"idValue\"]');" +
+                    "    const desc = row.querySelector('[data-test-id=\"descriptionValue\"]');" +
+                    "    const cap = row.querySelector('[data-test-id=\"captionValue\"]');" +
                     "    return {" +
-                    "        code: codeEl ? codeEl.innerText.trim() : ''," +
-                    "        name: nameEl ? nameEl.innerText.trim() : ''" +
+                    "        idValue: id ? id.innerText.trim() : ''," +
+                    "        descriptionValue: desc ? desc.innerText.trim() : ''," +
+                    "        captionValue: cap ? cap.innerText.trim() : ''" +
                     "    };" +
-                    "}).filter(x => x.code && x.name);"
+                    "});"
                 );
                 List<ScrapedGroup> groups = new ArrayList<>();
-                if (results != null) {
-                    for (Map<String, String> map : results) {
-                        groups.add(new ScrapedGroup(map.get("code").trim(), map.get("name").trim()));
+                java.util.Set<String> seen = new java.util.HashSet<>();
+                if (rows != null) {
+                    for (int i = 0; i < rows.size(); i++) {
+                        Map<String, String> m = rows.get(i);
+                        PartslinkGroupParser.ParsedGroup pg = PartslinkGroupParser.parseRow(
+                                m.get("idValue"), m.get("descriptionValue"), m.get("captionValue"), i);
+                        if (pg != null && seen.add(pg.code().toLowerCase())) {
+                            groups.add(new ScrapedGroup(pg.code(), pg.label()));
+                        }
                     }
                 }
                 if (!groups.isEmpty()) {
@@ -811,21 +821,20 @@ public class PartslinkScraperService {
             }
         }
 
+        // Fallback DOM par élément (même logique de parsing).
         List<ScrapedGroup> groups = new ArrayList<>();
+        java.util.Set<String> seen = new java.util.HashSet<>();
         List<WebElement> rows = findElementsInAnyContext(driver, By.cssSelector("[data-test-id=\"mainGroupsTable\"] [data-test-id=\"row\"]"));
-
-        for (WebElement row : rows) {
+        for (int i = 0; i < rows.size(); i++) {
             try {
-                String code = textOf(row, By.cssSelector("[data-test-id=\"idValue\"] span"));
-                String name = textOf(row, By.cssSelector("[data-test-id=\"descriptionValue\"] span"));
-
-                if (!StringUtils.hasText(code) || !StringUtils.hasText(name)) {
-                    continue;
-                }
-
-                boolean already = groups.stream().anyMatch(g -> g.code().equalsIgnoreCase(code));
-                if (!already) {
-                    groups.add(new ScrapedGroup(code.trim(), name.trim()));
+                WebElement row = rows.get(i);
+                PartslinkGroupParser.ParsedGroup pg = PartslinkGroupParser.parseRow(
+                        textOf(row, By.cssSelector("[data-test-id=\"idValue\"]")),
+                        textOf(row, By.cssSelector("[data-test-id=\"descriptionValue\"]")),
+                        textOf(row, By.cssSelector("[data-test-id=\"captionValue\"]")),
+                        i);
+                if (pg != null && seen.add(pg.code().toLowerCase())) {
+                    groups.add(new ScrapedGroup(pg.code(), pg.label()));
                 }
             } catch (Exception ex) {
                 log.debug("[Scraper] Skip main group row: {}", ex.getMessage());
@@ -1068,13 +1077,44 @@ public class PartslinkScraperService {
         if (rows == null || rows.isEmpty() || !StringUtils.hasText(groupCode)) {
             return null;
         }
+        String target = groupCode.trim();
+
+        // Code positionnel "#n" (marques sans code stable, ex. Mercedes) -> n-ième ligne.
+        if (target.startsWith("#")) {
+            try {
+                int idx = Integer.parseInt(target.substring(1)) - 1;
+                if (idx >= 0 && idx < rows.size()) {
+                    return rows.get(idx);
+                }
+            } catch (NumberFormatException ignored) {
+            }
+            return null;
+        }
+
+        // Match via le MÊME parser que l'extraction (cohérence BMW idValue / Audi-VW caption).
+        for (int i = 0; i < rows.size(); i++) {
+            try {
+                WebElement row = rows.get(i);
+                PartslinkGroupParser.ParsedGroup pg = PartslinkGroupParser.parseRow(
+                        textOf(row, By.cssSelector("[data-test-id=\"idValue\"]")),
+                        textOf(row, By.cssSelector("[data-test-id=\"descriptionValue\"]")),
+                        textOf(row, By.cssSelector("[data-test-id=\"captionValue\"]")),
+                        i);
+                if (pg != null && pg.code().equalsIgnoreCase(target)) {
+                    return row;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+
+        // Filet legacy : ancien match direct idValue/fgValue.
         for (WebElement row : rows) {
             try {
                 String code = textOf(row, By.cssSelector("[data-test-id=\"idValue\"] span"));
                 if (!StringUtils.hasText(code)) {
                     code = textOf(row, By.cssSelector("[data-test-id=\"fgValue\"] span"));
                 }
-                if (StringUtils.hasText(code) && code.trim().equalsIgnoreCase(groupCode.trim())) {
+                if (StringUtils.hasText(code) && code.trim().equalsIgnoreCase(target)) {
                     return row;
                 }
             } catch (Exception ignored) {

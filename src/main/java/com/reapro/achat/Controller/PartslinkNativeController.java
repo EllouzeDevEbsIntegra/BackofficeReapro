@@ -48,10 +48,15 @@ public class PartslinkNativeController {
         // Cache-first : un hit ne réserve AUCUNE session navigateur (réponse instantanée).
         Optional<com.reapro.achat.entities.primary.PartslinkVehicle> vehicleOpt = cacheService.findVehicleByVin(normalizedVin);
         if (vehicleOpt.isPresent()) {
+            // Self-heal : si la marque manque sur une vieille ligne de cache, on la complète
+            // depuis la marque sélectionnée au frontend (non destructif) → fiabilise les sous-groupes.
+            if (StringUtils.hasText(brand)) {
+                cacheService.backfillBrandCode(normalizedVin, brand.trim());
+            }
             com.reapro.achat.entities.primary.PartslinkVehicle vehicleEntity = vehicleOpt.get();
             List<com.reapro.achat.entities.primary.PartslinkGroup> groupsList = cacheService.findGroupsByVehicle(vehicleEntity);
 
-            log.info("[Controller] Cache hit for VIN={} (réponse instantanée, owner={})", normalizedVin, userId);
+            log.info("[Controller] VIN search CACHE_HIT vin={} owner={} groups={}", normalizedVin, userId, groupsList.size());
             Map<String, Object> response = new LinkedHashMap<>();
             response.put("jobId", "CACHE-" + normalizedVin);
             response.put("vin", normalizedVin);
@@ -178,13 +183,25 @@ public class PartslinkNativeController {
                 return row;
             }).toList();
             return ResponseEntity.ok(payload);
+        } catch (com.reapro.achat.partslink.PartslinkGroupNotFoundException notFound) {
+            // Cache parent incohérent même après refresh → message métier + invite au refresh VIN.
+            log.warn("[Controller] subgroups GROUP_REFRESH_NEEDED vin={} groupCode={}", vin, groupId);
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("message", "Les données de ce groupe sont à rafraîchir pour ce véhicule.");
+            body.put("code", "GROUP_REFRESH_NEEDED");
+            body.put("vin", notFound.getVin());
+            body.put("groupCode", notFound.getGroupCode());
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
         } catch (PartslinkPoolBusyException busy) {
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                     .body(Map.of("message", busy.getMessage(), "busy", true));
-        } catch (Exception ex) {
-            log.error("[Controller] Failed to fetch subgroups: {}", ex.getMessage());
+        } catch (IllegalArgumentException badReq) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(Map.of("message", ex.getMessage() != null ? ex.getMessage() : "Unknown error"));
+                    .body(Map.of("message", badReq.getMessage(), "code", "VIN_NOT_CACHED"));
+        } catch (Exception ex) {
+            log.error("[Controller] Failed to fetch subgroups vin={} groupCode={}: {}", vin, groupId, ex.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("message", "Impossible de récupérer les sous-groupes pour le moment."));
         }
     }
 

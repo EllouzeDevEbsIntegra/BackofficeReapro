@@ -39,7 +39,27 @@ public class PartslinkCacheService {
         String vin = details.vin().trim().toUpperCase();
         Optional<PartslinkVehicle> existing = vehicleRepository.findByVin(vin);
         if (existing.isPresent()) {
-            log.info("[Cache] Vehicle VIN={} already cached.", vin);
+            // Self-heal d'un cache incomplet/ancien (ex. lignes pré-migration V7 sans brand_code,
+            // ou véhicule présent sans groupes) — on ne casse jamais une valeur existante.
+            PartslinkVehicle v = existing.get();
+            boolean changed = false;
+            if (!org.springframework.util.StringUtils.hasText(v.getBrandCode())
+                    && org.springframework.util.StringUtils.hasText(details.brandCode())) {
+                v.setBrandCode(details.brandCode());
+                changed = true;
+            }
+            if (changed) {
+                vehicleRepository.save(v);
+                log.info("[Cache] VIN={} backfill brand_code (était vide).", vin);
+            }
+            List<PartslinkGroup> existingGroups = groupRepository.findByVehicle(v);
+            if (existingGroups.isEmpty() && details.groups() != null && !details.groups().isEmpty()) {
+                for (PartslinkScraperService.ScrapedGroup g : details.groups()) {
+                    groupRepository.save(PartslinkGroup.builder().vehicle(v).code(g.code()).name(g.name()).build());
+                }
+                log.info("[Cache] VIN={} backfill {} groupes (véhicule sans groupes).", vin, details.groups().size());
+            }
+            log.info("[Cache] Vehicle VIN={} déjà en cache (self-heal vérifié).", vin);
             return;
         }
 
@@ -75,35 +95,137 @@ public class PartslinkCacheService {
     public List<PartslinkScraperService.ScrapedSubgroup> getOrFetchSubgroups(String vin, String groupCode) {
         String cleanVin = vin.trim().toUpperCase();
         PartslinkVehicle vehicle = vehicleRepository.findByVin(cleanVin)
-                .orElseThrow(() -> new IllegalArgumentException("Vehicule avec le VIN " + cleanVin + " non trouve dans le cache. Recherchez d'abord le VIN."));
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Véhicule VIN=" + cleanVin + " absent du cache. Recherchez d'abord le VIN."));
 
-        PartslinkGroup group = groupRepository.findByVehicleAndCode(vehicle, groupCode)
-                .orElseThrow(() -> new IllegalArgumentException("Groupe '" + groupCode + "' non trouve pour le vehicule VIN=" + cleanVin));
+        String brandCode = vehicle.getBrandCode();
+        PartslinkGroup group = groupRepository.findByVehicleAndCode(vehicle, groupCode).orElse(null);
+
+        // Parent absent en cache → refresh ciblé des groupes pour ce VIN avant d'échouer.
+        if (group == null) {
+            log.warn("[Cache] VIN={} vehicleId={} groupCode={} : groupe parent ABSENT du cache → refresh ciblé.",
+                    cleanVin, vehicle.getId(), groupCode);
+            group = refreshGroupsAndReget(vehicle, cleanVin, brandCode, groupCode);
+            if (group == null) {
+                throw new PartslinkGroupNotFoundException(cleanVin, groupCode);
+            }
+        }
 
         List<PartslinkSubgroup> cachedSubgroups = subgroupRepository.findByGroup(group);
         if (!cachedSubgroups.isEmpty()) {
-            log.info("[Cache] Subgroups cache hit for VIN={} Group={}", cleanVin, groupCode);
+            log.info("[Cache] subgroups CACHE_HIT vin={} vehicleId={} groupCode={} count={} source=cache",
+                    cleanVin, vehicle.getId(), groupCode, cachedSubgroups.size());
             return cachedSubgroups.stream()
                     .map(sg -> new PartslinkScraperService.ScrapedSubgroup(sg.getCode(), sg.getName()))
                     .toList();
         }
 
-        log.info("[Cache] Subgroups cache miss for VIN={} Group={}. Réservation d'un slot du pool...", cleanVin, groupCode);
-        // Pass brand code to the scraper so it can navigate back to the vehicle page if needed
-        String brandCode = vehicle.getBrandCode();
+        log.info("[Cache] subgroups CACHE_MISS vin={} vehicleId={} groupCode={} brandKnown={} source=selenium",
+                cleanVin, vehicle.getId(), groupCode, org.springframework.util.StringUtils.hasText(brandCode));
+
         List<PartslinkScraperService.ScrapedSubgroup> scrapedSubgroups =
-                sessionPool.withLeasedDriver(driver -> scraperService.fetchSubgroups(driver, cleanVin, groupCode, brandCode));
+                scrapeSubgroupsWithRefresh(cleanVin, groupCode, brandCode);
 
         for (PartslinkScraperService.ScrapedSubgroup sgInfo : scrapedSubgroups) {
-            PartslinkSubgroup subgroup = PartslinkSubgroup.builder()
-                    .group(group)
-                    .code(sgInfo.code())
-                    .name(sgInfo.name())
-                    .build();
-            subgroupRepository.save(subgroup);
+            subgroupRepository.save(PartslinkSubgroup.builder()
+                    .group(group).code(sgInfo.code()).name(sgInfo.name()).build());
         }
-
+        log.info("[Cache] subgroups SCRAPED vin={} groupCode={} count={}", cleanVin, groupCode, scrapedSubgroups.size());
         return scrapedSubgroups;
+    }
+
+    /**
+     * Scrape les sous-groupes dans une session isolée, avec UN refresh ciblé : si la 1ʳᵉ tentative
+     * échoue ou revient vide (page véhicule pas rechargée, contexte perdu), on ré-identifie le VIN
+     * sur le même driver pour recharger la page des groupes, puis on retente une fois.
+     * Robuste quel que soit le détail DOM exact. Sans brandCode connu → erreur métier propre.
+     */
+    private List<PartslinkScraperService.ScrapedSubgroup> scrapeSubgroupsWithRefresh(
+            String vin, String groupCode, String brandCode) {
+        return sessionPool.withLeasedDriver(driver -> {
+            try {
+                List<PartslinkScraperService.ScrapedSubgroup> r =
+                        scraperService.fetchSubgroups(driver, vin, groupCode, brandCode);
+                if (r != null && !r.isEmpty()) {
+                    return r;
+                }
+                log.warn("[Cache] subgroups vide au 1er essai vin={} groupCode={}", vin, groupCode);
+            } catch (RuntimeException ex) {
+                log.warn("[Cache] 1er essai sous-groupes en échec vin={} groupCode={} : {}",
+                        vin, groupCode, ex.getMessage());
+            }
+            if (!org.springframework.util.StringUtils.hasText(brandCode)) {
+                // Pas de marque connue → impossible de recharger la page véhicule de façon fiable.
+                throw new PartslinkGroupNotFoundException(vin, groupCode);
+            }
+            log.info("[Cache] refresh ciblé : ré-identification vin={} brandKnown=true puis retry sous-groupes", vin);
+            scraperService.identifyVehicleAndGroups(driver, vin, brandCode, s -> { });
+            List<PartslinkScraperService.ScrapedSubgroup> retry =
+                    scraperService.fetchSubgroups(driver, vin, groupCode, brandCode);
+            if (retry == null || retry.isEmpty()) {
+                throw new PartslinkGroupNotFoundException(vin, groupCode);
+            }
+            return retry;
+        });
+    }
+
+    /** Ré-identifie le VIN (groupes) si la marque est connue, persiste, et retourne le groupe demandé. */
+    private PartslinkGroup refreshGroupsAndReget(PartslinkVehicle vehicle, String vin, String brandCode, String groupCode) {
+        if (!org.springframework.util.StringUtils.hasText(brandCode)) {
+            log.warn("[Cache] refresh groupes impossible vin={} : brand_code inconnu (re-recherche VIN requise).", vin);
+            return null;
+        }
+        PartslinkScraperService.ScrapedVehicleDetails details = sessionPool.withLeasedDriver(driver ->
+                scraperService.identifyVehicleAndGroups(driver, vin, brandCode, s -> { }));
+        saveVehicleAndGroups(details);
+        return groupRepository.findByVehicleAndCode(vehicle, groupCode).orElse(null);
+    }
+
+    /** Backfill non destructif du brand_code (déclenché par la recherche VIN sur cache hit). */
+    @Transactional
+    public void backfillBrandCode(String vin, String brand) {
+        if (!org.springframework.util.StringUtils.hasText(brand)) {
+            return;
+        }
+        String cleanVin = vin.trim().toUpperCase();
+        vehicleRepository.findByVin(cleanVin).ifPresent(v -> {
+            if (!org.springframework.util.StringUtils.hasText(v.getBrandCode())) {
+                v.setBrandCode(brand.trim());
+                vehicleRepository.save(v);
+                log.info("[Cache] VIN={} backfill brand_code via recherche VIN.", cleanVin);
+            }
+        });
+    }
+
+    /** Dump non sensible de la structure cache d'un VIN (endpoint admin de debug). */
+    @Transactional(readOnly = true)
+    public java.util.Map<String, Object> dumpStructure(String vin) {
+        String cleanVin = vin.trim().toUpperCase();
+        java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("vin", cleanVin);
+        Optional<PartslinkVehicle> vOpt = vehicleRepository.findByVin(cleanVin);
+        if (vOpt.isEmpty()) {
+            out.put("cached", false);
+            return out;
+        }
+        PartslinkVehicle v = vOpt.get();
+        out.put("cached", true);
+        out.put("vehicleId", v.getId());
+        out.put("brandCode", v.getBrandCode());
+        out.put("model", v.getModel());
+        List<PartslinkGroup> groups = groupRepository.findByVehicle(v);
+        List<java.util.Map<String, Object>> groupDump = new ArrayList<>();
+        for (PartslinkGroup g : groups) {
+            java.util.Map<String, Object> gm = new java.util.LinkedHashMap<>();
+            gm.put("groupId", g.getId());
+            gm.put("code", g.getCode());
+            gm.put("name", g.getName());
+            gm.put("subgroupCount", subgroupRepository.findByGroup(g).size());
+            groupDump.add(gm);
+        }
+        out.put("groupCount", groups.size());
+        out.put("groups", groupDump);
+        return out;
     }
 
     @Transactional

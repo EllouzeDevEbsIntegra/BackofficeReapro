@@ -23,6 +23,8 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -44,6 +46,8 @@ public class ReportErpSyncService {
     private final SyncAdaptableItemRepository syncAdaptableItemRepository;
     private final JdbcTemplate jdbcTemplate;
     private final NamedParameterJdbcTemplate sqlServerJdbcTemplate;
+    // DATA-001 : transaction COURTE pour le swap staging → live (gestionnaire du datasource primaire Postgres).
+    private final TransactionTemplate transactionTemplate;
 
     private final AtomicBoolean isSyncing = new AtomicBoolean(false);
 
@@ -60,7 +64,8 @@ public class ReportErpSyncService {
                                 ObjectMapper objectMapper,
                                 SyncAdaptableItemRepository syncAdaptableItemRepository,
                                 JdbcTemplate jdbcTemplate,
-                                @Qualifier("sqlServerJdbcTemplate") NamedParameterJdbcTemplate sqlServerJdbcTemplate) {
+                                @Qualifier("sqlServerJdbcTemplate") NamedParameterJdbcTemplate sqlServerJdbcTemplate,
+                                @Qualifier("primaryTransactionManager") PlatformTransactionManager transactionManager) {
         this.webClient = webClientBuilder.build();
         this.elvaItemRepository = elvaItemRepository;
         this.adminRepository = adminRepository;
@@ -69,6 +74,7 @@ public class ReportErpSyncService {
         this.syncAdaptableItemRepository = syncAdaptableItemRepository;
         this.jdbcTemplate = jdbcTemplate;
         this.sqlServerJdbcTemplate = sqlServerJdbcTemplate;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
     public boolean isSyncing() {
@@ -148,9 +154,12 @@ public class ReportErpSyncService {
                 }
             });
 
-            // 3. Vider la table locale PostgreSQL
-            log.info("Vidage de la table locale PostgreSQL...");
-            jdbcTemplate.execute("TRUNCATE TABLE sync_adaptable_item");
+            // 3. DATA-001 : on importe d'abord dans la table de STAGING. La table LIVE
+            //    (sync_adaptable_item) n'est JAMAIS vidée tant que l'import complet n'a pas réussi.
+            //    On ne vide donc QUE la staging avant import.
+            log.info("Début import staging : vidage de sync_adaptable_item_staging...");
+            jdbcTemplate.execute("TRUNCATE TABLE sync_adaptable_item_staging");
+            log.info("Table staging vidée.");
 
             // 4. Lecture paginée depuis l'API externe et insertion par lots dans PostgreSQL.
             //    DATA-002 : on NE s'arrête PAS sur "size < pageSize" — l'API externe peut plafonner
@@ -162,6 +171,10 @@ public class ReportErpSyncService {
             int maxPages = 10000; // garde-fou anti-boucle infinie (10000 * 10000 = 100M lignes max)
             boolean hasMore = true;
             int totalInserted = 0;
+            // DATA-001 : la promotion staging → live n'a lieu QUE si l'import s'est terminé proprement
+            // (page vide = fin réelle des données). Toute anomalie (réponse vide, JSON invalide,
+            // garde-fou maxPages) laisse ce flag à false → promotion annulée → table live intacte.
+            boolean importSucceeded = false;
 
             while (hasMore) {
                 log.info("Récupération de la page {} depuis l'API externe (taille: {})...", page, pageSize);
@@ -192,7 +205,8 @@ public class ReportErpSyncService {
 
                 ArrayNode listNode = (ArrayNode) rootNode.get("list");
                 if (listNode.isEmpty()) {
-                    log.info("Plus de données retournées à la page {}.", page);
+                    log.info("Plus de données retournées à la page {}. Fin propre de l'import.", page);
+                    importSucceeded = true; // fin réelle des données → import complet
                     break;
                 }
 
@@ -212,7 +226,22 @@ public class ReportErpSyncService {
                 }
             }
 
-            log.info("Synchronisation terminée avec succès. Total inséré : {} articles.", totalInserted);
+            // 5. DATA-001 : décision de promotion. Si l'import n'est pas allé jusqu'au bout
+            //    proprement, on NE touche PAS la table live (elle garde les données précédentes).
+            if (!importSucceeded) {
+                log.error("Import staging INCOMPLET (réponse vide / JSON invalide / garde-fou maxPages). "
+                        + "Promotion ANNULÉE — la table live sync_adaptable_item reste intacte. Lignes en staging : {}.",
+                        totalInserted);
+                throw new IllegalStateException(
+                        "Import sync-adaptable incomplet : promotion annulée, table live intacte.");
+            }
+
+            log.info("Import staging terminé : {} articles importés dans sync_adaptable_item_staging.", totalInserted);
+
+            // 6. Import complet OK → promotion atomique staging → live.
+            promoteStagingToLive(totalInserted);
+
+            log.info("Synchronisation terminée avec succès. Total : {} articles promus dans sync_adaptable_item.", totalInserted);
 
         } catch (Exception e) {
             log.error("Erreur critique durant la synchronisation des articles adaptables", e);
@@ -226,7 +255,8 @@ public class ReportErpSyncService {
                                      Map<String, String> groupNamesMap,
                                      Map<String, String> subgroupNamesMap,
                                      Map<String, String> champsLibreMap) {
-        String insertSql = "INSERT INTO sync_adaptable_item (" +
+        // DATA-001 : l'import écrit dans la STAGING, jamais directement dans la table live.
+        String insertSql = "INSERT INTO sync_adaptable_item_staging (" +
                 "ext_id, td_ref, td_brand_id, td_brand_name, td_description, " +
                 "oem, description, master, part_make_code, " +
                 "part_group_code, part_group_name, part_subgroup_code, part_subgroup_name, " +
@@ -273,6 +303,31 @@ public class ReportErpSyncService {
         }
 
         jdbcTemplate.batchUpdate(insertSql, batchArgs);
+    }
+
+    /**
+     * DATA-001 — Promotion ATOMIQUE de la table de staging vers la table live.
+     * Transaction COURTE (aucune I/O réseau dedans) gérée par le TransactionManager primaire :
+     *   TRUNCATE sync_adaptable_item ; INSERT INTO sync_adaptable_item SELECT ... FROM staging.
+     * En cas d'échec d'un des deux ordres → rollback automatique → la table live reste INTACTE
+     * (l'ancien contenu est conservé, jamais d'état vide partiel).
+     */
+    private void promoteStagingToLive(int totalInserted) {
+        log.info("Début promotion staging → live (sync_adaptable_item) : {} lignes...", totalInserted);
+        transactionTemplate.executeWithoutResult(status -> {
+            jdbcTemplate.execute("TRUNCATE TABLE sync_adaptable_item");
+            jdbcTemplate.update(
+                    "INSERT INTO sync_adaptable_item (" +
+                    "ext_id, td_ref, td_brand_id, td_brand_name, td_description, " +
+                    "oem, description, master, part_make_code, " +
+                    "part_group_code, part_group_name, part_subgroup_code, part_subgroup_name, champs_libre" +
+                    ") SELECT " +
+                    "ext_id, td_ref, td_brand_id, td_brand_name, td_description, " +
+                    "oem, description, master, part_make_code, " +
+                    "part_group_code, part_group_name, part_subgroup_code, part_subgroup_name, champs_libre" +
+                    " FROM sync_adaptable_item_staging");
+        });
+        log.info("Promotion staging → live OK : sync_adaptable_item contient désormais les nouvelles données.");
     }
 
     /**

@@ -1,6 +1,8 @@
 package com.reapro.achat.partslink;
 
 import com.reapro.achat.entities.primary.PartslinkGroup;
+import com.reapro.achat.entities.primary.PartslinkPart;
+import com.reapro.achat.entities.primary.PartslinkSchematic;
 import com.reapro.achat.entities.primary.PartslinkSubgroup;
 import com.reapro.achat.entities.primary.PartslinkVehicle;
 import com.reapro.achat.repositories.primary.PartslinkGroupRepository;
@@ -158,5 +160,110 @@ class PartslinkCacheServiceTest {
         cache.getOrFetchSubgroups("  wba8c31070k769705  ", "24");
 
         verify(vehicleRepo).findByVin(VIN); // trimmé + majuscules
+    }
+
+    // ===================== DÉTAILS (schéma + pièces) =====================
+
+    private PartslinkSubgroup subgroupWithParent(PartslinkVehicle v, PartslinkGroup parent, String code) {
+        return PartslinkSubgroup.builder().id(100L).group(parent).code(code).name("Convertisseur").build();
+    }
+
+    @Test
+    void detailsCacheHit_doesNotUsePool() {
+        PartslinkVehicle v = vehicle(1L, "bmw_parts");
+        PartslinkGroup parent = PartslinkGroup.builder().id(10L).vehicle(v).code("24").name("Boite").build();
+        PartslinkSubgroup sg = subgroupWithParent(v, parent, "24_1");
+        when(vehicleRepo.findByVin(VIN)).thenReturn(Optional.of(v));
+        when(groupRepo.findByVehicle(v)).thenReturn(List.of(parent));
+        when(subgroupRepo.findByGroupAndCode(parent, "24_1")).thenReturn(Optional.of(sg));
+        when(schematicRepo.findBySubgroup(sg)).thenReturn(Optional.of(
+                PartslinkSchematic.builder().id(1L).subgroup(sg).imagePath("/uploads/partslink/24_1.png").build()));
+        when(partRepo.findBySubgroup(sg)).thenReturn(List.of(
+                PartslinkPart.builder().id(1L).subgroup(sg).position("1").partNumber("11111").designation("Vis").quantity("2").build()));
+
+        PartslinkScraperService.ScrapedSubgroupDetails d = cache.getOrFetchSubgroupDetails(VIN, "24_1");
+
+        assertThat(d.imagePath()).isEqualTo("/uploads/partslink/24_1.png");
+        assertThat(d.parts()).hasSize(1);
+        verify(pool, never()).withLeasedDriver(any());
+    }
+
+    @Test
+    void detailsCacheMiss_scrapesWithParentGroupAndBrand_thenPersists() {
+        PartslinkVehicle v = vehicle(1L, "bmw_parts");
+        PartslinkGroup parent = PartslinkGroup.builder().id(10L).vehicle(v).code("24").name("Boite").build();
+        PartslinkSubgroup sg = subgroupWithParent(v, parent, "24_1");
+        when(vehicleRepo.findByVin(VIN)).thenReturn(Optional.of(v));
+        when(groupRepo.findByVehicle(v)).thenReturn(List.of(parent));
+        when(subgroupRepo.findByGroupAndCode(parent, "24_1")).thenReturn(Optional.of(sg));
+        when(schematicRepo.findBySubgroup(sg)).thenReturn(Optional.empty());
+        when(partRepo.findBySubgroup(sg)).thenReturn(List.of());
+        when(scraper.fetchPartsAndSchematic(any(), eq(VIN), eq("bmw_parts"), eq("24"), eq("24_1")))
+                .thenReturn(new PartslinkScraperService.ScrapedSubgroupDetails("/uploads/partslink/24_1.png",
+                        List.of(new PartslinkScraperService.ScrapedPart("1", "11111", "Vis", "", "2", ""))));
+        poolExecutesLambda();
+
+        PartslinkScraperService.ScrapedSubgroupDetails d = cache.getOrFetchSubgroupDetails(VIN, "24_1");
+
+        assertThat(d.parts()).hasSize(1);
+        verify(scraper).fetchPartsAndSchematic(any(), eq(VIN), eq("bmw_parts"), eq("24"), eq("24_1"));
+        verify(partRepo, times(1)).save(any(PartslinkPart.class));
+        verify(schematicRepo, times(1)).save(any(PartslinkSchematic.class));
+    }
+
+    @Test
+    void detailsWithSchematicButNoParts_returnsEmptyNotError() {
+        PartslinkVehicle v = vehicle(1L, "bmw_parts");
+        PartslinkGroup parent = PartslinkGroup.builder().id(10L).vehicle(v).code("24").name("Boite").build();
+        PartslinkSubgroup sg = subgroupWithParent(v, parent, "24_1");
+        when(vehicleRepo.findByVin(VIN)).thenReturn(Optional.of(v));
+        when(groupRepo.findByVehicle(v)).thenReturn(List.of(parent));
+        when(subgroupRepo.findByGroupAndCode(parent, "24_1")).thenReturn(Optional.of(sg));
+        when(schematicRepo.findBySubgroup(sg)).thenReturn(Optional.empty());
+        when(partRepo.findBySubgroup(sg)).thenReturn(List.of());
+        when(scraper.fetchPartsAndSchematic(any(), eq(VIN), eq("bmw_parts"), eq("24"), eq("24_1")))
+                .thenReturn(new PartslinkScraperService.ScrapedSubgroupDetails("/uploads/partslink/24_1.png", List.of()));
+        poolExecutesLambda();
+
+        PartslinkScraperService.ScrapedSubgroupDetails d = cache.getOrFetchSubgroupDetails(VIN, "24_1");
+
+        assertThat(d.parts()).isEmpty();
+        assertThat(d.imagePath()).isNotNull();
+    }
+
+    @Test
+    void detailsScrapeFailsAfterRetry_throwsCleanGroupNotFound() {
+        PartslinkVehicle v = vehicle(1L, "bmw_parts");
+        PartslinkGroup parent = PartslinkGroup.builder().id(10L).vehicle(v).code("24").name("Boite").build();
+        PartslinkSubgroup sg = subgroupWithParent(v, parent, "24_1");
+        when(vehicleRepo.findByVin(VIN)).thenReturn(Optional.of(v));
+        when(groupRepo.findByVehicle(v)).thenReturn(List.of(parent));
+        when(subgroupRepo.findByGroupAndCode(parent, "24_1")).thenReturn(Optional.of(sg));
+        when(schematicRepo.findBySubgroup(sg)).thenReturn(Optional.empty());
+        when(partRepo.findBySubgroup(sg)).thenReturn(List.of());
+        when(scraper.fetchPartsAndSchematic(any(), eq(VIN), eq("bmw_parts"), eq("24"), eq("24_1")))
+                .thenThrow(new IllegalStateException("DOM introuvable"));
+        poolExecutesLambda();
+
+        assertThatThrownBy(() -> cache.getOrFetchSubgroupDetails(VIN, "24_1"))
+                .isInstanceOf(PartslinkGroupNotFoundException.class);
+        verify(scraper, times(2)).fetchPartsAndSchematic(any(), eq(VIN), eq("bmw_parts"), eq("24"), eq("24_1"));
+    }
+
+    @Test
+    void detailsSubgroupNotCached_scrapesDirectWithoutParent() {
+        PartslinkVehicle v = vehicle(1L, "bmw_parts");
+        PartslinkGroup parent = PartslinkGroup.builder().id(10L).vehicle(v).code("24").name("Boite").build();
+        when(vehicleRepo.findByVin(VIN)).thenReturn(Optional.of(v));
+        when(groupRepo.findByVehicle(v)).thenReturn(List.of(parent));
+        when(subgroupRepo.findByGroupAndCode(parent, "99_9")).thenReturn(Optional.empty());
+        when(scraper.fetchPartsAndSchematic(any(), eq(VIN), eq("bmw_parts"), eq(null), eq("99_9")))
+                .thenReturn(new PartslinkScraperService.ScrapedSubgroupDetails(null, List.of()));
+        poolExecutesLambda();
+
+        PartslinkScraperService.ScrapedSubgroupDetails d = cache.getOrFetchSubgroupDetails(VIN, "99_9");
+
+        assertThat(d).isNotNull();
+        verify(scraper).fetchPartsAndSchematic(any(), eq(VIN), eq("bmw_parts"), eq(null), eq("99_9"));
     }
 }

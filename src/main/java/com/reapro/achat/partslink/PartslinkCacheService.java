@@ -232,29 +232,35 @@ public class PartslinkCacheService {
     public PartslinkScraperService.ScrapedSubgroupDetails getOrFetchSubgroupDetails(String vin, String subgroupCode) {
         String cleanVin = vin.trim().toUpperCase();
         PartslinkVehicle vehicle = vehicleRepository.findByVin(cleanVin)
-                .orElseThrow(() -> new IllegalArgumentException("Vehicule avec le VIN " + cleanVin + " non trouve."));
+                .orElseThrow(() -> new IllegalArgumentException("Véhicule VIN=" + cleanVin + " absent du cache."));
+        String brandCode = vehicle.getBrandCode();
 
-        // Since we don't have the parent groupCode in this path, we can find the subgroup by traversing through the vehicle's groups.
+        // Localiser le sous-groupe ET son groupe parent (nécessaire pour re-naviguer vers le schéma).
         List<PartslinkGroup> groups = groupRepository.findByVehicle(vehicle);
         PartslinkSubgroup subgroup = null;
+        PartslinkGroup parentGroup = null;
         for (PartslinkGroup group : groups) {
             Optional<PartslinkSubgroup> sgOpt = subgroupRepository.findByGroupAndCode(group, subgroupCode);
             if (sgOpt.isPresent()) {
                 subgroup = sgOpt.get();
+                parentGroup = group;
                 break;
             }
         }
+        String parentGroupCode = parentGroup != null ? parentGroup.getCode() : null;
 
         if (subgroup == null) {
-            log.info("[Cache] Subgroup entity not found in db for code={}. Réservation d'un slot du pool...", subgroupCode);
-            return sessionPool.withLeasedDriver(driver -> scraperService.fetchPartsAndSchematic(driver, cleanVin, subgroupCode));
+            // Sous-groupe pas (encore) en cache : scrape direct best-effort (parent inconnu).
+            log.info("[Cache] details sous-groupe ABSENT du cache code={} vin={} → scrape direct", subgroupCode, cleanVin);
+            return scrapeDetailsWithRefresh(cleanVin, brandCode, null, subgroupCode);
         }
 
         Optional<PartslinkSchematic> cachedSchematic = schematicRepository.findBySubgroup(subgroup);
         List<PartslinkPart> cachedParts = partRepository.findBySubgroup(subgroup);
 
         if (cachedSchematic.isPresent() && !cachedParts.isEmpty()) {
-            log.info("[Cache] Subgroup details cache hit for VIN={} Subgroup={}", cleanVin, subgroupCode);
+            log.info("[Cache] details CACHE_HIT vin={} subgroup={} parts={} source=cache",
+                    cleanVin, subgroupCode, cachedParts.size());
             List<PartslinkScraperService.ScrapedPart> scrapedParts = cachedParts.stream()
                     .map(p -> new PartslinkScraperService.ScrapedPart(
                             p.getPosition(),
@@ -268,9 +274,11 @@ public class PartslinkCacheService {
             return new PartslinkScraperService.ScrapedSubgroupDetails(cachedSchematic.get().getImagePath(), scrapedParts);
         }
 
-        log.info("[Cache] Subgroup details cache miss for VIN={} Subgroup={}. Réservation d'un slot du pool...", cleanVin, subgroupCode);
+        log.info("[Cache] details CACHE_MISS vin={} subgroup={} group={} brandKnown={} source=selenium",
+                cleanVin, subgroupCode, parentGroupCode,
+                org.springframework.util.StringUtils.hasText(brandCode));
         PartslinkScraperService.ScrapedSubgroupDetails details =
-                sessionPool.withLeasedDriver(driver -> scraperService.fetchPartsAndSchematic(driver, cleanVin, subgroupCode));
+                scrapeDetailsWithRefresh(cleanVin, brandCode, parentGroupCode, subgroupCode);
 
         // Save parts
         if (details.parts() != null) {
@@ -297,6 +305,36 @@ public class PartslinkCacheService {
             schematicRepository.save(schematic);
         }
 
+        log.info("[Cache] details SCRAPED vin={} subgroup={} parts={} schematic={}",
+                cleanVin, subgroupCode, details.parts() == null ? 0 : details.parts().size(),
+                details.imagePath() != null);
         return details;
+    }
+
+    /**
+     * Scrape les détails (schéma + pièces) dans une session isolée, avec un retry ciblé.
+     * Le scraper re-navigue lui-même véhicule → groupe → sous-groupe (autonome). Sans marque
+     * NI groupe parent connus, la re-navigation n'est pas fiable → erreur métier propre (409).
+     */
+    private PartslinkScraperService.ScrapedSubgroupDetails scrapeDetailsWithRefresh(
+            String vin, String brandCode, String groupCode, String subgroupCode) {
+        return sessionPool.withLeasedDriver(driver -> {
+            try {
+                return scraperService.fetchPartsAndSchematic(driver, vin, brandCode, groupCode, subgroupCode);
+            } catch (RuntimeException ex) {
+                log.warn("[Cache] 1er essai détails en échec vin={} subgroup={} : {}", vin, subgroupCode, ex.getMessage());
+                boolean canRetry = org.springframework.util.StringUtils.hasText(brandCode)
+                        && org.springframework.util.StringUtils.hasText(groupCode);
+                if (!canRetry) {
+                    throw new PartslinkGroupNotFoundException(vin, subgroupCode);
+                }
+                try {
+                    return scraperService.fetchPartsAndSchematic(driver, vin, brandCode, groupCode, subgroupCode);
+                } catch (RuntimeException ex2) {
+                    log.warn("[Cache] retry détails en échec vin={} subgroup={} : {}", vin, subgroupCode, ex2.getMessage());
+                    throw new PartslinkGroupNotFoundException(vin, subgroupCode);
+                }
+            }
+        });
     }
 }

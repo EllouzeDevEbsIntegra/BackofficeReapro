@@ -216,13 +216,24 @@ public class PartslinkNativeController {
             payload.put("imagePath", details.imagePath());
             payload.put("parts", details.parts());
             return ResponseEntity.ok(payload);
+        } catch (com.reapro.achat.partslink.PartslinkGroupNotFoundException notFound) {
+            log.warn("[Controller] details SUBGROUP_REFRESH_NEEDED vin={} subgroupCode={}", vin, subgroupId);
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("message", "Le schéma/les pièces de ce sous-groupe sont à rafraîchir pour ce véhicule.");
+            body.put("code", "SUBGROUP_REFRESH_NEEDED");
+            body.put("vin", notFound.getVin());
+            body.put("subgroupCode", notFound.getGroupCode());
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
         } catch (PartslinkPoolBusyException busy) {
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                     .body(Map.of("message", busy.getMessage(), "busy", true));
-        } catch (Exception ex) {
-            log.error("[Controller] Failed to fetch subgroup details: {}", ex.getMessage());
+        } catch (IllegalArgumentException badReq) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(Map.of("message", ex.getMessage() != null ? ex.getMessage() : "Unknown error"));
+                    .body(Map.of("message", badReq.getMessage(), "code", "VIN_NOT_CACHED"));
+        } catch (Exception ex) {
+            log.error("[Controller] Failed to fetch subgroup details vin={} subgroupCode={}: {}", vin, subgroupId, ex.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("message", "Impossible de récupérer le schéma et les pièces pour le moment."));
         }
     }
 

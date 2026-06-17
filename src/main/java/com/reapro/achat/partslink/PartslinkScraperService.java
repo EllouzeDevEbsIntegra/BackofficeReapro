@@ -475,13 +475,23 @@ public class PartslinkScraperService {
     /**
      * Extracts the parts list and the schematic image for a selected subgroup.
      */
-    public ScrapedSubgroupDetails fetchPartsAndSchematic(RemoteWebDriver driver, String vin, String subgroupCode) {
-        log.info("[Scraper] Fetching details (parts + schematic) for subgroupCode={} (VIN={})", subgroupCode, vin);
+    public ScrapedSubgroupDetails fetchPartsAndSchematic(RemoteWebDriver driver, String vin,
+                                                         String brandCode, String groupCode, String subgroupCode) {
+        log.info("[Scraper] Fetching details (parts + schematic) for subgroupCode={} (VIN={}, brand={}, group={})",
+                subgroupCode, vin, brandCode, groupCode);
         if (driver == null) {
             throw new IllegalStateException("WebDriver non initialisé.");
         }
         try {
             driver.switchTo().defaultContent();
+
+            // Le pool réinitialise le driver entre jobs (about:blank) et peut fournir un autre slot
+            // que celui utilisé pour les sous-groupes : on re-navigue donc explicitement
+            // véhicule -> groupe parent -> (sous-groupes chargés) avant de cliquer le sous-groupe.
+            // On réutilise les sélecteurs de navigation DÉJÀ validés (pas de nouveau sélecteur deviné).
+            if (StringUtils.hasText(groupCode) && !(StringUtils.hasText(subgroupCode) && subgroupCode.startsWith("ACTION::"))) {
+                navigateToParentGroup(driver, vin, brandCode, groupCode);
+            }
 
             if (StringUtils.hasText(subgroupCode) && subgroupCode.startsWith("ACTION::")) {
                 String actionLabel = subgroupCode.substring("ACTION::".length()).trim();
@@ -531,6 +541,42 @@ public class PartslinkScraperService {
     }
 
     // --- Helper Methods ---
+
+    /**
+     * Re-navigue véhicule -> groupe parent pour que la page sous-groupes soit chargée avant
+     * de cliquer un sous-groupe. Rend le scrape de détails AUTONOME (indépendant de l'état laissé
+     * par un éventuel fetchSubgroups précédent, désormais impossible avec le pool).
+     */
+    private void navigateToParentGroup(RemoteWebDriver driver, String vin, String brandCode, String groupCode) {
+        String vehicleUrl = buildVehicleUrl(vin, brandCode, driver.getCurrentUrl());
+        String currentUrl = driver.getCurrentUrl();
+        boolean onVehiclePage = currentUrl != null && currentUrl.contains(vin) && currentUrl.contains("/vehicle");
+        if (vehicleUrl != null && !onVehiclePage) {
+            log.info("[Scraper] Details: navigation page véhicule {}", vehicleUrl);
+            driver.navigate().to(vehicleUrl);
+            sleep(2500);
+        }
+        List<WebElement> rows = findElementsInAnyContext(driver,
+                By.cssSelector("[data-test-id=\"mainGroupsTable\"] [data-test-id=\"row\"]"));
+        WebElement groupRow = findGroupRowByCode(rows, groupCode);
+        if (groupRow == null) {
+            log.warn("[Scraper] Details: ligne groupe parent {} introuvable avant sélection sous-groupe.", groupCode);
+            return; // best effort
+        }
+        safeClick(driver, groupRow);
+        for (int i = 0; i < 15; i++) {
+            try {
+                Boolean has = (Boolean) driver.executeScript(
+                        "let c=document.querySelector('[data-test-id=\"subGroupsTable\"]');" +
+                        "return !!(c && c.querySelectorAll('[data-test-id=\"row\"]').length>0);");
+                if (Boolean.TRUE.equals(has)) {
+                    return;
+                }
+            } catch (Exception ignored) {
+            }
+            sleep(300);
+        }
+    }
 
     private boolean isValidSubgroupCode(String code, String groupCode) {
         if (!StringUtils.hasText(code)) {

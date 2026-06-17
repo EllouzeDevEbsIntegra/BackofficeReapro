@@ -71,66 +71,34 @@ public class PartslinkScraperService {
             throw new IllegalStateException("WebDriver non initialisé.");
         }
         try {
-            driver.switchTo().defaultContent();
+            performVinSearchSteps(driver, vin, brand, stepListener);
 
-            // New PL24 UI: navigate directly to brand page instead of clicking old brand logos.
-            if (StringUtils.hasText(brand)) {
-                stepListener.accept("Selection de la marque : " + brand + "...");
-                String brandUrl = "https://www.partslink24.com/pl24-app/" + brand + "/0/0?desktop=true&lang=fr";
-                log.info("[Scraper] Navigate to brand URL: {}", brandUrl);
-                driver.navigate().to(brandUrl);
-                sleep(2000);
-            }
-
-            stepListener.accept("Recherche du champ VIN...");
-            WebElement vinInput = findElementWithCandidates(driver, "VIN Input",
-                    By.cssSelector("input#vin"),
-                    By.cssSelector("input#vinSearch"),
-                    By.cssSelector("input[name*=\"vin\"]"),
-                    By.cssSelector("input[placeholder*=\"VIN\"]"),
-                    By.cssSelector("input[placeholder*=\"Acc\"]"),
-                    By.cssSelector("input[maxlength=\"17\"]"),
-                    By.cssSelector("div[data-test-id=\"content\"] input[type=\"text\"]")
-            );
-
-            if (vinInput == null) {
-                dumpDebug(driver, vin, "vin_input_not_found");
-                throw new IllegalStateException("Impossible de trouver le champ de saisie du VIN sur la page.");
-            }
-
-            stepListener.accept("Saisie du VIN...");
-            safeClick(driver, vinInput);
-            vinInput.sendKeys(Keys.chord(Keys.CONTROL, "a"));
-            vinInput.sendKeys(Keys.DELETE);
-            vinInput.sendKeys(vin);
-            sleep(300);
-
-            stepListener.accept("Validation de la recherche VIN...");
-            WebElement searchButton = findElementWithCandidates(driver, "VIN Search Button",
-                    By.cssSelector("[data-test-id=\"sendVehicleSearch\"]"),
-                    By.cssSelector(".icon--search-car"),
-                    By.cssSelector(".MuiInputAdornment-root [class*=\"search\"]")
-            );
-            if (searchButton != null) {
-                safeClick(driver, searchButton);
-            } else {
-                vinInput.sendKeys(Keys.ENTER);
-            }
-
+            // Signal RÉEL de "véhicule chargé" = lignes de mainGroupsTable présentes.
+            // (mainContainer/content existent AUSSI sur l'accueil -> ancien faux positif "Page d'accueil".)
             stepListener.accept("Attente du chargement du catalogue...");
-            boolean infoLoaded = false;
-            for (int i = 0; i < 25; i++) {
-                try {
-                    Boolean hasInfo = (Boolean) driver.executeScript(
-                        "return !!document.querySelector('.vehicle-info, .vehicle-data, #vehicle-details, [data-test-id=\"mainContainer\"], [data-test-id=\"content\"]');"
-                    );
-                    if (hasInfo != null && hasInfo) {
-                        infoLoaded = true;
-                        break;
+            boolean groupsLoaded = waitForMainGroups(driver, 30);
+
+            if (!groupsLoaded) {
+                String state = detectPageState(driver);
+                log.info("[Scraper] post-search vin={} brand={} url={} pageState={} groupRows=0",
+                        vin, brand, safeCurrentUrl(driver), state);
+                // Page de sélection véhicule intermédiaire (best-effort) : cliquer le résultat du VIN.
+                if ("VEHICLE_SELECTION".equals(state)) {
+                    stepListener.accept("Sélection du véhicule dans les résultats...");
+                    if (attemptVehicleSelection(driver, vin)) {
+                        groupsLoaded = waitForMainGroups(driver, 25);
                     }
-                } catch (Exception ignored) {}
-                sleep(300);
+                }
+                if (!groupsLoaded) {
+                    String finalState = detectPageState(driver);
+                    dumpDebug(driver, vin, "no_vehicle_page_" + finalState);
+                    log.warn("[Scraper] identify ABORT vin={} brand={} pageState={} (pas de groupes).",
+                            vin, brand, finalState);
+                    throw new PartslinkVehicleNotIdentifiedException(vin, brand, finalState);
+                }
             }
+            log.info("[Scraper] post-search vin={} brand={} url={} pageState=VEHICLE_PAGE",
+                    vin, brand, safeCurrentUrl(driver));
 
             stepListener.accept("Extraction des informations vehicule...");
             WebElement infoPanel = findElementWithCandidates(driver, "Vehicle Info Panel",
@@ -159,9 +127,11 @@ public class PartslinkScraperService {
             stepListener.accept("Recuperation des groupes principaux...");
             List<ScrapedGroup> groups = extractMainGroups(driver);
             if (groups.isEmpty()) {
+                // Garde-fou : ne devrait plus arriver après waitForMainGroups, mais reste propre.
                 dumpDebug(driver, vin, "groups_empty");
-                throw new IllegalStateException("Aucun groupe principal trouve pour le vehicule.");
+                throw new PartslinkVehicleNotIdentifiedException(vin, brand, detectPageState(driver));
             }
+            log.info("[Scraper] identify OK vin={} brand={} groupCount={}", vin, brand, groups.size());
 
             stepListener.accept("Extraction terminee.");
             // Capture the current brand code from the URL so we can navigate back later
@@ -170,6 +140,8 @@ public class PartslinkScraperService {
                     vin, modelDesignation, productionDate, color, upholstery, transmission, modelCode, model, resolvedBrand, groups
             );
 
+        } catch (PartslinkVehicleNotIdentifiedException e) {
+            throw e; // erreur métier typée → propagée telle quelle (message propre)
         } catch (Exception e) {
             log.error("[Scraper] Failed to identify vehicle: {}", e.getMessage(), e);
             throw new IllegalStateException("Erreur lors de la recherche du VIN: " + e.getMessage(), e);
@@ -576,6 +548,198 @@ public class PartslinkScraperService {
             }
             sleep(300);
         }
+    }
+
+    private void performVinSearchSteps(RemoteWebDriver driver, String vin, String brand,
+                                       java.util.function.Consumer<String> stepListener) {
+        driver.switchTo().defaultContent();
+        if (StringUtils.hasText(brand)) {
+            stepListener.accept("Selection de la marque : " + brand + "...");
+            String brandUrl = "https://www.partslink24.com/pl24-app/" + brand + "/0/0?desktop=true&lang=fr";
+            log.info("[Scraper] Navigate to brand URL: {}", brandUrl);
+            driver.navigate().to(brandUrl);
+            sleep(2000);
+        }
+        stepListener.accept("Recherche du champ VIN...");
+        WebElement vinInput = findElementWithCandidates(driver, "VIN Input",
+                By.cssSelector("input#vin"),
+                By.cssSelector("input#vinSearch"),
+                By.cssSelector("input[name*=\"vin\"]"),
+                By.cssSelector("input[placeholder*=\"VIN\"]"),
+                By.cssSelector("input[placeholder*=\"Acc\"]"),
+                By.cssSelector("input[maxlength=\"17\"]"),
+                By.cssSelector("div[data-test-id=\"content\"] input[type=\"text\"]")
+        );
+        if (vinInput == null) {
+            dumpDebug(driver, vin, "vin_input_not_found");
+            throw new IllegalStateException("Impossible de trouver le champ de saisie du VIN sur la page.");
+        }
+        stepListener.accept("Saisie du VIN...");
+        safeClick(driver, vinInput);
+        vinInput.sendKeys(Keys.chord(Keys.CONTROL, "a"));
+        vinInput.sendKeys(Keys.DELETE);
+        vinInput.sendKeys(vin);
+        sleep(300);
+        stepListener.accept("Validation de la recherche VIN...");
+        WebElement searchButton = findElementWithCandidates(driver, "VIN Search Button",
+                By.cssSelector("[data-test-id=\"sendVehicleSearch\"]"),
+                By.cssSelector(".icon--search-car"),
+                By.cssSelector(".MuiInputAdornment-root [class*=\"search\"]")
+        );
+        if (searchButton != null) {
+            safeClick(driver, searchButton);
+        } else {
+            vinInput.sendKeys(Keys.ENTER);
+        }
+    }
+
+    private int mainGroupRowCount(RemoteWebDriver driver) {
+        try {
+            Object n = driver.executeScript(
+                    "return document.querySelectorAll('[data-test-id=\"mainGroupsTable\"] [data-test-id=\"row\"]').length;");
+            if (n instanceof Number) {
+                return ((Number) n).intValue();
+            }
+        } catch (Exception ignored) {
+        }
+        return 0;
+    }
+
+    private boolean waitForMainGroups(RemoteWebDriver driver, int attempts) {
+        for (int i = 0; i < attempts; i++) {
+            if (mainGroupRowCount(driver) > 0) {
+                return true;
+            }
+            sleep(300);
+        }
+        return false;
+    }
+
+    /**
+     * Classement d'état de page — PUR et testable (aucune dépendance Selenium).
+     * La présence de lignes mainGroupsTable est le SEUL signal "véhicule chargé"
+     * (mainContainer/accueil ne suffisent pas).
+     */
+    static String classifyPageState(int groupRowCount, String currentUrl, String title,
+                                    String containerText, boolean hasError, boolean hasVehicleSelection) {
+        if (groupRowCount > 0) {
+            return "VEHICLE_PAGE";
+        }
+        if (hasError) {
+            return "ERROR";
+        }
+        String url = currentUrl == null ? "" : currentUrl.toLowerCase();
+        String t = title == null ? "" : title.toLowerCase();
+        String txt = containerText == null ? "" : containerText.toLowerCase();
+        boolean looksHome = txt.contains("accueil") || txt.contains("home")
+                || t.contains("accueil") || t.contains("home")
+                || url.contains("/0/0");
+        if (looksHome) {
+            return "HOME";
+        }
+        if (hasVehicleSelection) {
+            return "VEHICLE_SELECTION";
+        }
+        if (url.isEmpty() && txt.isEmpty()) {
+            return "UNKNOWN";
+        }
+        return "NO_RESULT";
+    }
+
+    private String detectPageState(RemoteWebDriver driver) {
+        int rows = mainGroupRowCount(driver);
+        String url = safeCurrentUrl(driver);
+        String title;
+        try {
+            title = driver.getTitle();
+        } catch (Exception e) {
+            title = null;
+        }
+        String containerText = shortContainerText(driver);
+        boolean hasError = !findElementsInAnyContext(driver, By.cssSelector(
+                "#loginErrorDiv, #sessionCheckError, .error-message, [data-test-id=\"errorMessage\"]")).isEmpty();
+        boolean hasSelection = detectVehicleSelection(driver);
+        return classifyPageState(rows, url, title, containerText, hasError, hasSelection);
+    }
+
+    private String shortContainerText(RemoteWebDriver driver) {
+        try {
+            Object txt = driver.executeScript(
+                    "let c=document.querySelector('[data-test-id=\"mainContainer\"], [data-test-id=\"content\"], body');" +
+                    "return c ? (c.innerText||'').trim().slice(0,200) : '';");
+            return txt == null ? "" : txt.toString();
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
+    private boolean detectVehicleSelection(RemoteWebDriver driver) {
+        try {
+            Object n = driver.executeScript(
+                    "return document.querySelectorAll('[data-test-id=\"vehicleSearchResult\"], " +
+                    "[data-test-id=\"searchResult\"] [data-test-id=\"row\"], .vehicle-result, " +
+                    ".search-results [data-test-id=\"row\"]').length;");
+            if (n instanceof Number) {
+                return ((Number) n).intValue() > 0;
+            }
+        } catch (Exception ignored) {
+        }
+        return false;
+    }
+
+    private boolean attemptVehicleSelection(RemoteWebDriver driver, String vin) {
+        WebElement row = findElementByTextOrAttr(driver, vin,
+                By.cssSelector("[data-test-id=\"vehicleSearchResult\"]"),
+                By.cssSelector("[data-test-id=\"searchResult\"] [data-test-id=\"row\"]"),
+                By.cssSelector(".vehicle-result"),
+                By.cssSelector(".search-results [data-test-id=\"row\"]"),
+                By.cssSelector("a"));
+        if (row == null) {
+            return false;
+        }
+        log.info("[Scraper] Sélection véhicule : clic sur le résultat contenant le VIN.");
+        safeClick(driver, row);
+        sleep(1500);
+        return true;
+    }
+
+    private String safeCurrentUrl(RemoteWebDriver driver) {
+        try {
+            return driver.getCurrentUrl();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Outil de debug contrôlé : navigue + recherche VIN, puis dumpe l'état DOM post-recherche
+     * (URL, titre, présence groupes, texte court, état détecté) — SANS secret. Permet d'inspecter
+     * réellement la page Mercedes "Page d'accueil" sur PROD via l'endpoint admin.
+     */
+    public java.util.Map<String, Object> inspectAfterVinSearch(RemoteWebDriver driver, String vin, String brand) {
+        if (driver == null) {
+            throw new IllegalStateException("WebDriver non initialisé.");
+        }
+        performVinSearchSteps(driver, vin, brand, s -> { });
+        waitForMainGroups(driver, 30);
+        java.util.Map<String, Object> dump = new java.util.LinkedHashMap<>();
+        dump.put("vin", vin);
+        dump.put("brand", brand);
+        dump.put("url", safeCurrentUrl(driver));
+        String title;
+        try {
+            title = driver.getTitle();
+        } catch (Exception e) {
+            title = null;
+        }
+        dump.put("title", title);
+        int rows = mainGroupRowCount(driver);
+        dump.put("mainGroupRowCount", rows);
+        dump.put("hasMainGroupsTable", rows > 0);
+        dump.put("mainContainerText", shortContainerText(driver));
+        dump.put("hasVehicleSelection", detectVehicleSelection(driver));
+        dump.put("pageState", detectPageState(driver));
+        return dump;
     }
 
     private boolean isValidSubgroupCode(String code, String groupCode) {

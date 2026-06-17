@@ -81,7 +81,7 @@ public class PartslinkScraperService {
             if (!groupsLoaded) {
                 String state = detectPageState(driver);
                 log.info("[Scraper] post-search vin={} brand={} url={} pageState={} groupRows=0",
-                        vin, brand, safeCurrentUrl(driver), state);
+                        vin, brand, PartslinkUrls.stripQuery(safeCurrentUrl(driver)), state);
                 // Page de sélection véhicule intermédiaire (best-effort) : cliquer le résultat du VIN.
                 if ("VEHICLE_SELECTION".equals(state)) {
                     stepListener.accept("Sélection du véhicule dans les résultats...");
@@ -98,7 +98,7 @@ public class PartslinkScraperService {
                 }
             }
             log.info("[Scraper] post-search vin={} brand={} url={} pageState=VEHICLE_PAGE",
-                    vin, brand, safeCurrentUrl(driver));
+                    vin, brand, PartslinkUrls.stripQuery(safeCurrentUrl(driver)));
 
             stepListener.accept("Extraction des informations vehicule...");
             WebElement infoPanel = findElementWithCandidates(driver, "Vehicle Info Panel",
@@ -725,7 +725,7 @@ public class PartslinkScraperService {
         java.util.Map<String, Object> dump = new java.util.LinkedHashMap<>();
         dump.put("vin", vin);
         dump.put("brand", brand);
-        dump.put("url", safeCurrentUrl(driver));
+        dump.put("url", PartslinkUrls.stripQuery(safeCurrentUrl(driver))); // anti-fuite token en query
         String title;
         try {
             title = driver.getTitle();
@@ -736,10 +736,40 @@ public class PartslinkScraperService {
         int rows = mainGroupRowCount(driver);
         dump.put("mainGroupRowCount", rows);
         dump.put("hasMainGroupsTable", rows > 0);
+        // Clé du diagnostic Mercedes : VEHICLE_PAGE + groups_empty => des <row> existent mais l'extraction
+        // par-ligne (idValue/descriptionValue) ne matche pas la structure de cette marque. On expose le
+        // HTML de la 1re ligne (catalogue, non sensible) pour révéler la vraie structure DOM par marque.
+        dump.put("extractedGroupCount", extractMainGroups(driver).size());
+        dump.put("firstGroupRowHtml", firstGroupRowHtml(driver));
+        dump.put("iframeCount", intFromJs(driver, "return document.querySelectorAll('iframe,frame').length;"));
+        dump.put("shadowHostCount", intFromJs(driver,
+                "return Array.from(document.querySelectorAll('*')).filter(e=>e.shadowRoot).length;"));
         dump.put("mainContainerText", shortContainerText(driver));
         dump.put("hasVehicleSelection", detectVehicleSelection(driver));
         dump.put("pageState", detectPageState(driver));
         return dump;
+    }
+
+    private int intFromJs(RemoteWebDriver driver, String js) {
+        try {
+            Object n = driver.executeScript(js);
+            if (n instanceof Number) {
+                return ((Number) n).intValue();
+            }
+        } catch (Exception ignored) {
+        }
+        return -1;
+    }
+
+    private String firstGroupRowHtml(RemoteWebDriver driver) {
+        try {
+            Object html = driver.executeScript(
+                    "let r=document.querySelector('[data-test-id=\"mainGroupsTable\"] [data-test-id=\"row\"]');" +
+                    "return r ? r.outerHTML.slice(0,800) : '';");
+            return html == null ? "" : html.toString();
+        } catch (Exception ignored) {
+            return "";
+        }
     }
 
     private boolean isValidSubgroupCode(String code, String groupCode) {

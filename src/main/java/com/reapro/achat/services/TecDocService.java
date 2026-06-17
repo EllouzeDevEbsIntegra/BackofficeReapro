@@ -23,6 +23,11 @@ public class TecDocService {
     private final ParameterService parameterService;
     private final ObjectMapper objectMapper;
 
+    /** Langue TecDoc — toujours en minuscules ("fr"), conformément à la licence Reapro. */
+    private static final String LANG = "fr";
+    /** Type de cible de liaison par défaut : "P" = véhicules de tourisme (Passenger). */
+    private static final String DEFAULT_LINKAGE_TYPE = "P";
+
     public TecDocApiResponse searchArticles(String searchQuery, Integer supplierId) {
         TecDocApiResponse resp = searchInternal(searchQuery, 0, true, supplierId);
         if (resp != null && resp.getArticles() != null) {
@@ -48,7 +53,7 @@ public class TecDocService {
 
         Map<String, Object> requestBody = Map.of("getArticleLinkedAllLinkingTargetManufacturer2", Map.of(
                 "articleCountry", country, "articleId", legacyArticleId, "country", country,
-                "lang", "FR", "linkingTargetType", "P", "provider", providerId));
+                "lang", LANG, "linkingTargetType", "P", "provider", providerId));
 
         try {
             Map<?, ?> response = webClientBuilder.build().post().uri(url).header("api-key", apiKey)
@@ -77,7 +82,7 @@ public class TecDocService {
 
         Map<String, Object> requestBody = Map.of("getArticlePartList", Map.of(
                 "articleCountry", country, "articleId", legacyArticleId,
-                "lang", "FR", "provider", providerId));
+                "lang", LANG, "provider", providerId));
 
         try {
             Map<?, ?> response = webClientBuilder.build().post().uri(url).header("api-key", apiKey)
@@ -122,7 +127,7 @@ public class TecDocService {
 
         Map<String, Object> step1Request = Map.of("getArticleLinkedAllLinkingTarget4", Map.of(
                 "articleCountry", country, "articleId", articleId, "country", country,
-                "lang", "FR", "linkingTargetManuId", manuId, "linkingTargetType", "P", "provider", providerId));
+                "lang", LANG, "linkingTargetManuId", manuId, "linkingTargetType", "P", "provider", providerId));
 
         try {
             Map<?, ?> resp1 = webClientBuilder.build().post().uri(url).header("api-key", apiKey)
@@ -145,7 +150,7 @@ public class TecDocService {
                         .collect(Collectors.toList());
 
                 Map<String, Object> step2Request = Map.of("getArticleLinkedAllLinkingTargetsByIds3", Map.of(
-                        "articleCountry", country, "articleId", articleId, "lang", "FR",
+                        "articleCountry", country, "articleId", articleId, "lang", LANG,
                         "linkedArticlePairs", Map.of("array", pairs), "linkingTargetType", "P", "provider", providerId));
 
                 Map<?, ?> resp2 = webClientBuilder.build().post().uri(url).header("api-key", apiKey)
@@ -228,7 +233,7 @@ public class TecDocService {
         Map<String, Object> body = Map.of("getBrands", Map.of(
                 "articleCountry", parameterService.getValue(ParameterService.TECDOC_COUNTRY),
                 "provider", Long.parseLong(parameterService.getValue(ParameterService.TECDOC_PROVIDER)),
-                "lang", "FR", "dataSupplierIds", supplierId, "includeDataSupplierLogo", true));
+                "lang", LANG, "dataSupplierIds", supplierId, "includeDataSupplierLogo", true));
         try {
             TecDocBrandsResponse resp = webClientBuilder.build().post().uri(url).header("api-key", apiKey)
                     .bodyValue(body).retrieve().bodyToMono(TecDocBrandsResponse.class).block();
@@ -246,12 +251,192 @@ public class TecDocService {
 
         Map<String, Object> params = new HashMap<>(Map.of(
                 "articleCountry", country, "provider", providerId, "searchQuery", searchQuery,
-                "searchType", searchType, "lang", "FR", "includeAll", includeAll));
+                "searchType", searchType, "lang", LANG, "includeAll", includeAll));
         if (supplierId != null && supplierId > 0) params.put("dataSupplierIds", supplierId);
 
         try {
             return webClientBuilder.build().post().uri(url).header("api-key", apiKey)
                     .bodyValue(Map.of("getArticles", params)).retrieve().bodyToMono(TecDocApiResponse.class).block();
         } catch (Exception e) { throw new ApiException(ErrorCode.BC_API_ERROR, "Erreur TecDoc"); }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // CATALOGUE TECDOC (Phase 1) — autocomplete, sélection véhicule, familles, articles
+    //
+    // Tous les appels passent par le proxy serveur : api-key / provider / country
+    // restent côté backend et ne sont JAMAIS exposés au frontend.
+    // articleCountry / linkageTargetCountry = TECDOC_COUNTRY (= "TN") ; lang = "fr".
+    // Aucune recherche VIN (hors licence) : aucune méthode getVehiclesByVIN ici.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /** Appel bas niveau générique au GW TecDoc ; renvoie la réponse JSON brute (sans secret). */
+    private Map<String, Object> callTecDoc(String method, Map<String, Object> params) {
+        String url = parameterService.getValue(ParameterService.TECDOC_API_URL);
+        String apiKey = parameterService.getValue(ParameterService.TECDOC_API_KEY);
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> resp = webClientBuilder.build().post().uri(url)
+                    .header("api-key", apiKey)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(Map.of(method, params))
+                    .retrieve().bodyToMono(Map.class).block();
+            return resp != null ? resp : Collections.emptyMap();
+        } catch (Exception e) {
+            log.error("[TECDOC] Erreur appel {} : {}", method, e.getMessage());
+            throw new ApiException(ErrorCode.BC_API_ERROR, "Erreur TecDoc");
+        }
+    }
+
+    private Long providerId() {
+        return Long.parseLong(parameterService.getValue(ParameterService.TECDOC_PROVIDER));
+    }
+
+    private String country() {
+        return parameterService.getValue(ParameterService.TECDOC_COUNTRY);
+    }
+
+    private static String safeType(String type) {
+        return (type == null || type.isBlank()) ? DEFAULT_LINKAGE_TYPE : type.trim();
+    }
+
+    /** Autocomplétion de la barre de recherche catalogue. */
+    public Map<String, Object> getAutoCompleteSuggestions(String query) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("articleCountry", country());
+        params.put("lang", LANG);
+        params.put("provider", providerId());
+        params.put("searchQuery", query);
+        return callTecDoc("getAutoCompleteSuggestions", params);
+    }
+
+    /** Étape 1 véhicule : constructeurs (facettes fabricants). */
+    public Map<String, Object> getVehicleManufacturers(String linkageTargetType) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("linkageTargetCountry", country());
+        params.put("lang", LANG);
+        params.put("provider", providerId());
+        params.put("linkageTargetType", safeType(linkageTargetType));
+        params.put("includeMfrFacets", true);
+        params.put("page", 1);
+        params.put("perPage", 1);
+        return callTecDoc("getLinkageTargets", params);
+    }
+
+    /** Étape 2 véhicule : modèles / séries d'un constructeur (facettes séries). */
+    public Map<String, Object> getVehicleModels(String linkageTargetType, Long mfrId) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("linkageTargetCountry", country());
+        params.put("lang", LANG);
+        params.put("provider", providerId());
+        params.put("linkageTargetType", safeType(linkageTargetType));
+        params.put("mfrIds", mfrId);
+        params.put("includeVehicleModelSeriesFacets", true);
+        params.put("page", 1);
+        params.put("perPage", 1);
+        return callTecDoc("getLinkageTargets", params);
+    }
+
+    /** Étape 3 véhicule : types / motorisations d'une série de modèle. */
+    public Map<String, Object> getVehicleTypes(String linkageTargetType, Long mfrId, Long modelSeriesId,
+                                               int page, int perPage) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("linkageTargetCountry", country());
+        params.put("lang", LANG);
+        params.put("provider", providerId());
+        params.put("linkageTargetType", safeType(linkageTargetType));
+        params.put("mfrIds", mfrId);
+        params.put("vehicleModelSeriesIds", modelSeriesId);
+        params.put("page", page);
+        params.put("perPage", perPage);
+        return callTecDoc("getLinkageTargets", params);
+    }
+
+    /** Familles / sous-familles (arbre assembly groups) pour un véhicule sélectionné. */
+    public Map<String, Object> getAssemblyGroups(Long linkageTargetId, String linkageTargetType) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("articleCountry", country());
+        params.put("lang", LANG);
+        params.put("provider", providerId());
+        if (linkageTargetId != null) params.put("linkageTargetId", linkageTargetId);
+        params.put("linkageTargetType", safeType(linkageTargetType));
+        params.put("assemblyGroupFacetOptions", Map.of(
+                "enabled", true,
+                "includeCompleteTree", true));
+        params.put("page", 1);
+        params.put("perPage", 1);
+        return callTecDoc("getArticles", params);
+    }
+
+    /** Recherche catalogue d'articles (texte / famille / véhicule) avec pagination + enrichissements V1. */
+    public Map<String, Object> getCatalogArticles(TecDocCatalogQuery q) {
+        Map<String, Object> params = new HashMap<>();
+        params.put("articleCountry", country());
+        params.put("lang", LANG);
+        params.put("provider", providerId());
+
+        if (q.searchQuery() != null && !q.searchQuery().isBlank()) {
+            params.put("searchQuery", q.searchQuery());
+            params.put("searchType", q.searchType() != null ? q.searchType() : 0);
+            params.put("searchMatchType", q.searchMatchType() != null ? q.searchMatchType() : "exact");
+        }
+        if (q.assemblyGroupNodeId() != null) {
+            params.put("assemblyGroupNodeIds", q.assemblyGroupNodeId());
+        }
+        if (q.linkageTargetId() != null) {
+            params.put("linkageTargetId", q.linkageTargetId());
+            params.put("linkageTargetType", safeType(q.linkageTargetType()));
+        }
+        if (q.dataSupplierIds() != null) {
+            params.put("dataSupplierIds", q.dataSupplierIds());
+        }
+
+        params.put("page", q.page());
+        params.put("perPage", q.perPage());
+
+        // Enrichissements V1 (catalogue en ligne)
+        params.put("includeGenericArticles", true);
+        params.put("includeArticleText", true);
+        params.put("includeOEMNumbers", true);
+        params.put("includeImages", true);
+        params.put("includeGTINs", true);
+        params.put("includeArticleCriteria", true);
+
+        // NB : pas de facette fabricants sur getArticles (non documentée par Pegasus et absente
+        // de la réponse runtime). Le filtre fabricant s'appuie exclusivement sur la liste GLOBALE
+        // getBrands (getDataSuppliers / GET /api/tecdoc/data-suppliers) + le param dataSupplierIds.
+        return callTecDoc("getArticles", params);
+    }
+
+    /**
+     * Liste GLOBALE des fabricants / fournisseurs TecDoc (référence getBrands, NON scopée à une
+     * recherche). Sert de source au filtre fabricant quand la facette serveur n'est pas disponible.
+     * On renvoie une liste légère {dataSupplierId, mfrName} (sans logos/adresses).
+     */
+    @SuppressWarnings("unchecked")
+    public List<Map<String, Object>> getDataSuppliers() {
+        Map<String, Object> params = new HashMap<>();
+        params.put("articleCountry", country());
+        params.put("lang", LANG);
+        params.put("provider", providerId());
+        Map<String, Object> resp = callTecDoc("getBrands", params);
+
+        Object data = resp.get("data");
+        Object array = (data instanceof Map) ? ((Map<String, Object>) data).get("array") : null;
+        List<Map<String, Object>> out = new ArrayList<>();
+        if (array instanceof List) {
+            for (Object o : (List<?>) array) {
+                if (o instanceof Map) {
+                    Map<String, Object> b = (Map<String, Object>) o;
+                    Object id = b.get("dataSupplierId");
+                    Object name = b.get("mfrName");
+                    if (id == null || name == null) continue;
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("dataSupplierId", id);
+                    m.put("mfrName", name);
+                    out.add(m);
+                }
+            }
+        }
+        return out;
     }
 }

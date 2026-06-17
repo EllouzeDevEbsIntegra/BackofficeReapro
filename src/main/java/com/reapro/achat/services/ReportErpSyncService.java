@@ -152,9 +152,14 @@ public class ReportErpSyncService {
             log.info("Vidage de la table locale PostgreSQL...");
             jdbcTemplate.execute("TRUNCATE TABLE sync_adaptable_item");
 
-            // 4. Lecture paginée depuis l'API externe et insertion par lots dans PostgreSQL
+            // 4. Lecture paginée depuis l'API externe et insertion par lots dans PostgreSQL.
+            //    DATA-002 : on NE s'arrête PAS sur "size < pageSize" — l'API externe peut plafonner
+            //    la taille de page sous le pageSize demandé (ex. 5000 < 10000), ce qui provoquerait
+            //    un import partiel silencieux. On continue tant que la page contient des lignes ;
+            //    l'arrêt se fait sur page vide (garde plus bas), borné par un garde-fou maxPages.
             int page = 1;
             int pageSize = 10000;
+            int maxPages = 10000; // garde-fou anti-boucle infinie (10000 * 10000 = 100M lignes max)
             boolean hasMore = true;
             int totalInserted = 0;
 
@@ -194,12 +199,16 @@ public class ReportErpSyncService {
                 // Insertion par lot dans PostgreSQL
                 saveBatchToPostgres(listNode, groupNamesMap, subgroupNamesMap, champsLibreMap);
                 totalInserted += listNode.size();
-                log.info("Batch inséré : {} éléments (total inséré: {})", listNode.size(), totalInserted);
+                log.info("Batch inséré : {} éléments (page {}, total inséré: {})", listNode.size(), page, totalInserted);
 
-                if (listNode.size() < pageSize) {
+                // DATA-002 : on avance toujours d'une page ; l'arrêt vient de la page vide ci-dessus
+                // (et non de "size < pageSize"). Garde-fou anti-boucle infinie sur maxPages.
+                page++;
+                if (page > maxPages) {
+                    log.warn("Garde-fou pagination atteint (maxPages={}) pour la synchronisation adaptable. "
+                            + "Arrêt préventif après {} lignes importées (dernière page {}).",
+                            maxPages, totalInserted, page - 1);
                     hasMore = false;
-                } else {
-                    page++;
                 }
             }
 

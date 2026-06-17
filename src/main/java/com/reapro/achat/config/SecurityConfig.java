@@ -31,7 +31,7 @@ public class SecurityConfig {
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
         );
 
-        // Routes publiques
+        // Routes publiques (authentification réelle uniquement)
         http.authorizeHttpRequests(auth ->
                 auth.requestMatchers(
                                 "/api/auth/register",
@@ -43,14 +43,21 @@ public class SecurityConfig {
                                 "/api/auth/change-password",
                                 "/auth/refresh-token",
                                 "/api/version",
-                                "/api/elva-items/sync",
-                                "/api/v1/sync-adaptable",
-                                "/api/v1/sync-adaptable/sync",
-                                "/api/v1/sync-adaptable/sync-status",
                                 "/error"
                         ).permitAll()
 
-                        // Toutes les autres routes â†’ protÃ©gÃ©es
+                        // Endpoints de synchronisation (déclencheurs lourds + lecture catalogue) :
+                        // JAMAIS accessibles sans authentification (SEC-001 / SEC-004 / SEC-005).
+                        // .authenticated() pour ce premier lot : tous les comptes sont ROLE_ADMIN
+                        // aujourd'hui, les rôles ne différencient pas encore les accès — on resserrera
+                        // en hasRole("ADMIN") quand un vrai système de rôles sera en place.
+                        .requestMatchers(
+                                "/api/v1/sync-adaptable",
+                                "/api/v1/sync-adaptable/**",
+                                "/api/elva-items/sync"
+                        ).authenticated()
+
+                        // Toutes les autres routes → protégées
                         .anyRequest().authenticated()
         );
 

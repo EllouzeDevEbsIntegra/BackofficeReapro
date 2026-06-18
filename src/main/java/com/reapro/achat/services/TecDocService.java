@@ -241,6 +241,113 @@ public class TecDocService {
         } catch (Exception e) { return null; }
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Logos fournisseurs (mini-jeu « Défi Fabricant ») — RAPIDE & non bloquant :
+    //  • 1 SEUL appel getBrands batché pour tous les supplierIds manquants (pas N appels) ;
+    //  • cache MÉMOIRE permanent par supplierId (les logos ne changent quasi jamais)
+    //    → les parties suivantes sont instantanées (aucun appel TecDoc) ;
+    //  • timeout court + jamais d'exception remontée → si TecDoc lent/indispo, on renvoie
+    //    ce qu'on a (le jeu affiche alors le NOM en fallback). Aucun token exposé.
+    // ─────────────────────────────────────────────────────────────────────────
+    private final java.util.concurrent.ConcurrentHashMap<Integer, String> supplierLogoCache =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Retourne supplierId -> URL logo (200px) pour les ids connus ; absent si pas de logo. */
+    public Map<Integer, String> getSupplierLogos(Collection<Integer> supplierIds) {
+        Map<Integer, String> result = new HashMap<>();
+        List<Integer> missing = new ArrayList<>();
+        for (Integer id : supplierIds) {
+            if (id == null) continue;
+            String cached = supplierLogoCache.get(id);
+            if (cached != null) {
+                if (!cached.isEmpty()) result.put(id, cached);   // "" = connu sans logo
+            } else if (!missing.contains(id)) {
+                missing.add(id);
+            }
+        }
+        if (!missing.isEmpty()) {
+            Map<Integer, String> fetched = batchFetchSupplierLogos(missing);
+            if (fetched != null) {   // null = appel en échec → on NE caché PAS (réessai plus tard)
+                for (Integer id : missing) {
+                    String u = fetched.get(id);
+                    supplierLogoCache.put(id, u == null ? "" : u);
+                    if (u != null) result.put(id, u);
+                }
+            }
+        }
+        return result;
+    }
+
+    /** Un seul appel getBrands pour plusieurs supplierIds. {@code null} si l'appel échoue. */
+    private Map<Integer, String> batchFetchSupplierLogos(List<Integer> ids) {
+        try {
+            String url = parameterService.getValue(ParameterService.TECDOC_API_URL);
+            String apiKey = parameterService.getValue(ParameterService.TECDOC_API_KEY);
+            Map<String, Object> body = Map.of("getBrands", Map.of(
+                    "articleCountry", parameterService.getValue(ParameterService.TECDOC_COUNTRY),
+                    "provider", Long.parseLong(parameterService.getValue(ParameterService.TECDOC_PROVIDER)),
+                    "lang", LANG, "dataSupplierIds", ids, "includeDataSupplierLogo", true));
+            TecDocBrandsResponse resp = webClientBuilder.build().post().uri(url).header("api-key", apiKey)
+                    .bodyValue(body).retrieve().bodyToMono(TecDocBrandsResponse.class)
+                    .block(Duration.ofSeconds(3));
+            Map<Integer, String> out = new HashMap<>();
+            if (resp != null && resp.getData() != null && resp.getData().getArray() != null) {
+                for (TecDocBrand b : resp.getData().getArray()) {
+                    if (b.getDataSupplierId() != null && b.getDataSupplierLogo() != null
+                            && b.getDataSupplierLogo().getImageURL200() != null) {
+                        out.put(b.getDataSupplierId().intValue(), b.getDataSupplierLogo().getImageURL200());
+                    }
+                }
+            }
+            return out;
+        } catch (Exception e) {
+            log.warn("TecDoc batch logos indisponible: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    // Image de pièce (mini-jeu) : URL photo 200px d'un article par sa référence. Cache mémoire +
+    // timeout court + jamais d'exception → si TecDoc lent/indispo ou pas d'image, renvoie null
+    // (le front affiche alors une image par défaut). Recherche par référence seule (pas de supplierId).
+    private final java.util.concurrent.ConcurrentHashMap<String, String> partImageCache =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    public String getArticleImageUrl(String reference) {
+        if (reference == null || reference.isBlank()) return null;
+        String key = reference.trim();
+        String cached = partImageCache.get(key);
+        if (cached != null) return cached.isEmpty() ? null : cached;
+
+        String found = null;
+        try {
+            String url = parameterService.getValue(ParameterService.TECDOC_API_URL);
+            String apiKey = parameterService.getValue(ParameterService.TECDOC_API_KEY);
+            String country = parameterService.getValue(ParameterService.TECDOC_COUNTRY);
+            Long provider = Long.parseLong(parameterService.getValue(ParameterService.TECDOC_PROVIDER));
+            Map<String, Object> params = new HashMap<>(Map.of(
+                    "articleCountry", country, "provider", provider, "searchQuery", key,
+                    "searchType", 0, "lang", LANG, "includeAll", false));
+            TecDocApiResponse resp = webClientBuilder.build().post().uri(url).header("api-key", apiKey)
+                    .bodyValue(Map.of("getArticles", params)).retrieve().bodyToMono(TecDocApiResponse.class)
+                    .block(Duration.ofSeconds(3));
+            if (resp != null && resp.getArticles() != null) {
+                for (TecDocArticle a : resp.getArticles()) {
+                    if (a.getImages() != null) {
+                        for (TecDocArticle.TecDocImage img : a.getImages()) {
+                            String u = img.getImageURL200() != null ? img.getImageURL200() : img.getImageURL800();
+                            if (u != null && !u.isBlank()) { found = u; break; }
+                        }
+                    }
+                    if (found != null) break;
+                }
+            }
+            partImageCache.put(key, found == null ? "" : found);   // succès → caché (incl. « pas d'image »)
+        } catch (Exception e) {
+            log.warn("TecDoc image indisponible pour {}: {}", key, e.getMessage());   // échec → pas de cache (réessai)
+        }
+        return found;
+    }
+
     public TecDocApiResponse searchArticlesType1(String searchQuery) { return searchInternal(searchQuery, 1, false, null); }
 
     private TecDocApiResponse searchInternal(String searchQuery, int searchType, boolean includeAll, Integer supplierId) {

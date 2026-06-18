@@ -6,6 +6,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -17,10 +18,25 @@ import java.io.IOException;
 
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class JwtFilter extends OncePerRequestFilter {
 
     private final JwtUtils jwtUtils;
     private final AdminRepository adminRepository;
+
+    /**
+     * CORRECTIF 403 : les endpoints renvoyant un type réactif ({@code Mono}/{@code Flux}) sont
+     * traités en ASYNC par Spring MVC. Par défaut, {@link OncePerRequestFilter} ne s'exécute PAS
+     * sur le dispatch ASYNC ({@code shouldNotFilterAsyncDispatch()} = true) → le SecurityContext
+     * n'est pas repeuplé lors de l'écriture du résultat → {@code .authenticated()} refuse → 403.
+     * On force donc l'exécution du filtre JWT aussi sur le dispatch ASYNC.
+     * (Ex. {@code GET /api/v1/sync-adaptable} renvoie {@code Mono} ; {@code /api/compare-quotes}
+     * est synchrone et n'était donc pas impacté.)
+     */
+    @Override
+    protected boolean shouldNotFilterAsyncDispatch() {
+        return false;
+    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
@@ -50,6 +66,17 @@ public class JwtFilter extends OncePerRequestFilter {
                 }
             }
         }
+
+        // Log de diagnostic SÛR (jamais de token/cookie) : chemin, type de dispatch, auth présente, authorities.
+        if (log.isDebugEnabled()) {
+            var current = SecurityContextHolder.getContext().getAuthentication();
+            log.debug("[JwtFilter] path={} dispatch={} authPresent={} authorities={}",
+                    request.getRequestURI(),
+                    request.getDispatcherType(),
+                    current != null,
+                    current != null ? current.getAuthorities() : "[]");
+        }
+
         filterChain.doFilter(request, response);
     }
 

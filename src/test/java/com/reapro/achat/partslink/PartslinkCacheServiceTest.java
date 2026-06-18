@@ -109,6 +109,24 @@ class PartslinkCacheServiceTest {
         verify(scraper).identifyVehicleAndGroups(any(), eq(VIN), eq("bmw_parts"), any()); // refresh exécuté
     }
 
+    // --- Perf : sous-groupes vides structurels → échec rapide, AUCUNE ré-identification ---
+    @Test
+    void subgroupsStructuralEmpty_failsFast_withoutReidentify() {
+        PartslinkVehicle v = vehicle(1L, "audi_parts");
+        PartslinkGroup g = PartslinkGroup.builder().id(10L).vehicle(v).code("6").name("Moteur").build();
+        when(vehicleRepo.findByVin(VIN)).thenReturn(Optional.of(v));
+        when(groupRepo.findByVehicleAndCode(v, "6")).thenReturn(Optional.of(g));
+        when(subgroupRepo.findByGroup(g)).thenReturn(List.of());
+        when(scraper.fetchSubgroups(any(), eq(VIN), eq("6"), eq("audi_parts"))).thenReturn(List.of()); // rows=0 structurel
+        poolExecutesLambda();
+
+        assertThatThrownBy(() -> cache.getOrFetchSubgroups(VIN, "6"))
+                .isInstanceOf(PartslinkGroupNotFoundException.class);
+        // pas de refresh coûteux (ré-identification VIN) ni de 2e essai sur vide structurel
+        verify(scraper, never()).identifyVehicleAndGroups(any(), any(), any(), any());
+        verify(scraper, times(1)).fetchSubgroups(any(), eq(VIN), eq("6"), eq("audi_parts"));
+    }
+
     // --- Parent absent + marque inconnue → erreur métier propre (pas de stack brute) ---
     @Test
     void parentGroupMissing_withoutBrand_throwsCleanGroupNotFound() {

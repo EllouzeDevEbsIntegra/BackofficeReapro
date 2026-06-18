@@ -772,6 +772,130 @@ public class PartslinkScraperService {
         }
     }
 
+    /**
+     * Inspection contrôlée du niveau SOUS-GROUPES : navigue véhicule → clique le groupe → capture
+     * l'état DOM réel après clic (sélecteurs présents, compteurs multi-sélecteurs, 1ʳᵉ ligne, iframe,
+     * shadow, timings) — SANS secret. Révèle où sont (ou non) les sous-groupes Audi/Mercedes.
+     * Réseau : non capturé ici (perf logging non activé sur le pool) → utiliser le script console.
+     */
+    public java.util.Map<String, Object> inspectSubgroups(RemoteWebDriver driver, String vin, String brand, String groupCode) {
+        if (driver == null) {
+            throw new IllegalStateException("WebDriver non initialisé.");
+        }
+        java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("vin", vin);
+        out.put("brand", brand);
+        out.put("groupCode", groupCode);
+
+        long t0 = System.nanoTime();
+        driver.switchTo().defaultContent();
+        String vehicleUrl = buildVehicleUrl(vin, brand, driver.getCurrentUrl());
+        if (vehicleUrl != null) {
+            driver.navigate().to(vehicleUrl);
+            sleep(2500);
+        }
+        long tNav = System.nanoTime();
+        out.put("beforeUrl", PartslinkUrls.stripQuery(safeCurrentUrl(driver)));
+
+        List<WebElement> rows = findElementsInAnyContext(driver,
+                By.cssSelector("[data-test-id=\"mainGroupsTable\"] [data-test-id=\"row\"]"));
+        WebElement groupRow = findGroupRowByCode(rows, groupCode);
+        out.put("groupRowFound", groupRow != null);
+        if (groupRow != null) {
+            try {
+                out.put("clickedGroupText", trunc(groupRow.getText(), 200));
+            } catch (Exception e) {
+                out.put("clickedGroupText", "");
+            }
+            try {
+                out.put("clickedGroupHtml", trunc((String) driver.executeScript("return arguments[0].outerHTML;", groupRow), 800));
+            } catch (Exception e) {
+                out.put("clickedGroupHtml", "");
+            }
+            safeClick(driver, groupRow);
+        } else {
+            out.put("clickedGroupText", "");
+            out.put("clickedGroupHtml", "");
+        }
+        long tClick = System.nanoTime();
+
+        boolean appeared = false;
+        for (int i = 0; i < 17; i++) {
+            if (intFromJs(driver, "return document.querySelectorAll('[data-test-id=\"subGroupsTable\"] [data-test-id=\"row\"]').length;") > 0) {
+                appeared = true;
+                break;
+            }
+            sleep(300);
+        }
+        long tWait = System.nanoTime();
+
+        out.put("afterUrl", PartslinkUrls.stripQuery(safeCurrentUrl(driver)));
+        String title;
+        try {
+            title = driver.getTitle();
+        } catch (Exception e) {
+            title = null;
+        }
+        out.put("title", title);
+        out.put("pageState", detectPageState(driver));
+        out.put("dataTestIds", listFromJs(driver,
+                "return Array.from(new Set(Array.from(document.querySelectorAll('[data-test-id]')).map(e=>e.getAttribute('data-test-id')))).slice(0,80);"));
+        out.put("subGroupsTableFound",
+                intFromJs(driver, "return document.querySelector('[data-test-id=\"subGroupsTable\"]') ? 1 : 0;") == 1);
+
+        java.util.Map<String, Object> counts = new java.util.LinkedHashMap<>();
+        counts.put("subGroupsTable_row", intFromJs(driver, "return document.querySelectorAll('[data-test-id=\"subGroupsTable\"] [data-test-id=\"row\"]').length;"));
+        counts.put("mainGroupsTable_row", intFromJs(driver, "return document.querySelectorAll('[data-test-id=\"mainGroupsTable\"] [data-test-id=\"row\"]').length;"));
+        counts.put("any_testid_row", intFromJs(driver, "return document.querySelectorAll('[data-test-id=\"row\"]').length;"));
+        counts.put("table_tr", intFromJs(driver, "return document.querySelectorAll('table tr').length;"));
+        out.put("subgroupRowCounts", counts);
+        out.put("subgroupRowCount", counts.get("subGroupsTable_row"));
+        out.put("firstSubgroupRowHtml", trunc(stringFromJs(driver,
+                "let r=document.querySelector('[data-test-id=\"subGroupsTable\"] [data-test-id=\"row\"]');return r?r.outerHTML:'';"), 800));
+        out.put("lastAnyRowHtml", trunc(stringFromJs(driver,
+                "let rs=document.querySelectorAll('[data-test-id=\"row\"]');return rs.length>0?rs[rs.length-1].outerHTML:'';"), 800));
+        out.put("iframeCount", intFromJs(driver, "return document.querySelectorAll('iframe,frame').length;"));
+        out.put("shadowHostCount", intFromJs(driver, "return Array.from(document.querySelectorAll('*')).filter(e=>e.shadowRoot).length;"));
+        out.put("networkCalls", java.util.List.of());
+        out.put("networkNote", "Capture réseau via script console DevTools (perf logging non activé côté pool).");
+
+        java.util.Map<String, Object> timings = new java.util.LinkedHashMap<>();
+        timings.put("navMs", (tNav - t0) / 1_000_000);
+        timings.put("clickMs", (tClick - tNav) / 1_000_000);
+        timings.put("waitMs", (tWait - tClick) / 1_000_000);
+        timings.put("subgroupsAppeared", appeared);
+        out.put("timings", timings);
+        return out;
+    }
+
+    private String trunc(String s, int n) {
+        if (s == null) {
+            return "";
+        }
+        return s.length() <= n ? s : s.substring(0, n);
+    }
+
+    private String stringFromJs(RemoteWebDriver driver, String js) {
+        try {
+            Object o = driver.executeScript(js);
+            return o == null ? "" : o.toString();
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private java.util.List<Object> listFromJs(RemoteWebDriver driver, String js) {
+        try {
+            Object o = driver.executeScript(js);
+            if (o instanceof java.util.List) {
+                return (java.util.List<Object>) o;
+            }
+        } catch (Exception ignored) {
+        }
+        return java.util.List.of();
+    }
+
     private boolean isValidSubgroupCode(String code, String groupCode) {
         if (!StringUtils.hasText(code)) {
             return false;

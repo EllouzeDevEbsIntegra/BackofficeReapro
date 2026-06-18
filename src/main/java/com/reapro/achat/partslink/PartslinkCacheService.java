@@ -135,10 +135,14 @@ public class PartslinkCacheService {
     }
 
     /**
-     * Scrape les sous-groupes dans une session isolée, avec UN refresh ciblé : si la 1ʳᵉ tentative
-     * échoue ou revient vide (page véhicule pas rechargée, contexte perdu), on ré-identifie le VIN
-     * sur le même driver pour recharger la page des groupes, puis on retente une fois.
-     * Robuste quel que soit le détail DOM exact. Sans brandCode connu → erreur métier propre.
+     * Scrape les sous-groupes dans une session isolée.
+     *
+     * <p><b>Perf (preuve logs) :</b> l'ancien "refresh ciblé" ré-identifiait le VIN complet puis
+     * retentait — or quand la 1ʳᵉ tentative revient <b>vide sans exception</b>, c'est un échec
+     * <b>structurel</b> (page véhicule chargée mais 0 ligne sous-groupe pour cette marque) : la
+     * ré-identification répète exactement le même rows=0 et <b>double le délai</b> (12→30s). On
+     * échoue donc <b>vite</b> sur vide structurel, et on ne retente (1 fois, léger) que sur erreur
+     * <b>transitoire</b> (élément périmé/navigation), sans ré-identification complète.</p>
      */
     private List<PartslinkScraperService.ScrapedSubgroup> scrapeSubgroupsWithRefresh(
             String vin, String groupCode, String brandCode) {
@@ -149,23 +153,27 @@ public class PartslinkCacheService {
                 if (r != null && !r.isEmpty()) {
                     return r;
                 }
-                log.warn("[Cache] subgroups vide au 1er essai vin={} groupCode={}", vin, groupCode);
-            } catch (RuntimeException ex) {
-                log.warn("[Cache] 1er essai sous-groupes en échec vin={} groupCode={} : {}",
-                        vin, groupCode, ex.getMessage());
-            }
-            if (!org.springframework.util.StringUtils.hasText(brandCode)) {
-                // Pas de marque connue → impossible de recharger la page véhicule de façon fiable.
+                // Vide SANS exception = structurel → pas de refresh inutile, échec rapide.
+                log.warn("[Cache] subgroups rows=0 STRUCTUREL vin={} groupCode={} → échec rapide (pas de re-identify)",
+                        vin, groupCode);
+                throw new PartslinkGroupNotFoundException(vin, groupCode);
+            } catch (PartslinkGroupNotFoundException notFound) {
+                throw notFound;
+            } catch (RuntimeException transient_) {
+                // Erreur transitoire → 1 seul retry léger (même page, pas de ré-identification VIN).
+                log.warn("[Cache] subgroups erreur transitoire vin={} groupCode={} : {} → 1 retry",
+                        vin, groupCode, transient_.getMessage());
+                try {
+                    List<PartslinkScraperService.ScrapedSubgroup> retry =
+                            scraperService.fetchSubgroups(driver, vin, groupCode, brandCode);
+                    if (retry != null && !retry.isEmpty()) {
+                        return retry;
+                    }
+                } catch (RuntimeException ignored) {
+                    // tombe dans l'erreur métier propre ci-dessous
+                }
                 throw new PartslinkGroupNotFoundException(vin, groupCode);
             }
-            log.info("[Cache] refresh ciblé : ré-identification vin={} brandKnown=true puis retry sous-groupes", vin);
-            scraperService.identifyVehicleAndGroups(driver, vin, brandCode, s -> { });
-            List<PartslinkScraperService.ScrapedSubgroup> retry =
-                    scraperService.fetchSubgroups(driver, vin, groupCode, brandCode);
-            if (retry == null || retry.isEmpty()) {
-                throw new PartslinkGroupNotFoundException(vin, groupCode);
-            }
-            return retry;
         });
     }
 

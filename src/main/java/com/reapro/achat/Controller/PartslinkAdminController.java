@@ -58,4 +58,23 @@ public class PartslinkAdminController {
                 driver -> scraperService.inspectAfterVinSearch(driver, cleanVin, cleanBrand));
         return ResponseEntity.ok(dump);
     }
+
+    /**
+     * Inspection LIVE niveau SOUS-GROUPES : navigue véhicule → clique le groupe → dumpe l'état DOM
+     * réel après clic (sélecteurs, compteurs multi-sélecteurs, 1ʳᵉ ligne, iframe/shadow, timings) —
+     * sans secret. Révèle pourquoi Audi/Mercedes renvoient rows=0. À retirer après diagnostic.
+     */
+    @PreAuthorize("hasRole('ADMIN')")
+    @GetMapping("/debug/subgroups/{vin}")
+    public ResponseEntity<Map<String, Object>> debugSubgroups(
+            @PathVariable("vin") String vin,
+            @RequestParam(value = "brand", required = false) String brand,
+            @RequestParam("groupCode") String groupCode) {
+        String cleanVin = vin == null ? "" : vin.trim().toUpperCase();
+        String cleanBrand = StringUtils.hasText(brand) ? brand.trim() : null;
+        log.info("[Admin] debug SUBGROUPS dump vin={} brand={} groupCode={}", cleanVin, cleanBrand, groupCode);
+        Map<String, Object> dump = sessionPool.withLeasedDriver(
+                driver -> scraperService.inspectSubgroups(driver, cleanVin, cleanBrand, groupCode));
+        return ResponseEntity.ok(dump);
+    }
 }

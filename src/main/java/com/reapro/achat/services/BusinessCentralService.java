@@ -9,6 +9,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.time.Duration;
 import java.util.Map;
@@ -145,9 +146,103 @@ public class BusinessCentralService {
         return execute(spec, responseType, "PATCH Custom");
     }
 
+    /**
+     * GET binaire sur API STANDARD (ex : contenu média d'une photo BC).
+     * Renvoie le flux brut (image) ; renvoie null si la ressource est absente (404).
+     * Aucun secret n'est journalisé (seule l'URL — sans token — est tracée comme pour les autres appels BC).
+     */
+    public byte[] getStandardBinary(String endpoint, String companyId) {
+        String url = buildUrl(standardBase(), companyId, endpoint, null);
+        log.info("BC GET Standard (binaire) URL = {}", url);
+        try {
+            return getBinaryClient().get()
+                    .uri(url)
+                    .accept(MediaType.ALL)
+                    .retrieve()
+                    .bodyToMono(byte[].class)
+                    .timeout(Duration.ofMillis(parameterService.getIntValue(ParameterService.BC_TIMEOUT, 30000)))
+                    .block();
+        } catch (WebClientResponseException.NotFound e) {
+            log.info("BC GET Standard (binaire) : contenu absent (404)");
+            return null;
+        } catch (WebClientResponseException e) {
+            log.error("Erreur BC GET binaire (Status {})", e.getStatusCode());
+            throw new ApiException(ErrorCode.BC_API_ERROR, "Erreur communication Business Central", e);
+        } catch (Exception e) {
+            log.error("Erreur BC GET binaire : {}", e.getMessage());
+            throw new ApiException(ErrorCode.BC_API_ERROR, "Erreur communication Business Central", e);
+        }
+    }
+
+    /**
+     * PATCH binaire sur API STANDARD (mise à jour du contenu média : flux image brut).
+     * {@code contentType} = type MIME de l'image ; {@code ifMatch} = ETag (ou "*").
+     */
+    public void patchStandardBinary(String endpoint,
+                                    String companyId,
+                                    byte[] content,
+                                    String contentType,
+                                    String ifMatch) {
+        String url = buildUrl(standardBase(), companyId, endpoint, null);
+        log.info("BC PATCH Standard (binaire) URL = {} ({} octets, type={})",
+                url, content != null ? content.length : 0, contentType);
+        try {
+            getBinaryClient().patch()
+                    .uri(url)
+                    .header(HttpHeaders.IF_MATCH, ifMatch != null ? ifMatch : "*")
+                    .contentType(MediaType.parseMediaType(contentType))
+                    .bodyValue(content)
+                    .retrieve()
+                    .toBodilessEntity()
+                    .timeout(Duration.ofMillis(parameterService.getIntValue(ParameterService.BC_TIMEOUT, 30000)))
+                    .block();
+        } catch (WebClientResponseException e) {
+            log.error("Erreur BC PATCH binaire (Status {})", e.getStatusCode());
+            throw new ApiException(ErrorCode.BC_API_ERROR, "Erreur communication Business Central", e);
+        } catch (Exception e) {
+            log.error("Erreur BC PATCH binaire : {}", e.getMessage());
+            throw new ApiException(ErrorCode.BC_API_ERROR, "Erreur communication Business Central", e);
+        }
+    }
+
+    /**
+     * DELETE sur API STANDARD ({@code ifMatch} = ETag ou "*").
+     */
+    public void deleteStandard(String endpoint, String companyId, String ifMatch) {
+        String url = buildUrl(standardBase(), companyId, endpoint, null);
+        log.info("BC DELETE Standard URL = {}", url);
+        try {
+            getClient().delete()
+                    .uri(url)
+                    .header(HttpHeaders.IF_MATCH, ifMatch != null ? ifMatch : "*")
+                    .retrieve()
+                    .toBodilessEntity()
+                    .timeout(Duration.ofMillis(parameterService.getIntValue(ParameterService.BC_TIMEOUT, 30000)))
+                    .block();
+        } catch (WebClientResponseException e) {
+            log.error("Erreur BC DELETE (Status {})", e.getStatusCode());
+            throw new ApiException(ErrorCode.BC_API_ERROR, "Erreur communication Business Central", e);
+        } catch (Exception e) {
+            log.error("Erreur BC DELETE : {}", e.getMessage());
+            throw new ApiException(ErrorCode.BC_API_ERROR, "Erreur communication Business Central", e);
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────
     // UTILITAIRES PRIVÉS
     // ─────────────────────────────────────────────────────────────
+
+    /**
+     * Client BC pour les échanges binaires : même auth que {@link #getClient()},
+     * mais SANS forcer Content-Type/Accept = JSON (on gère ces en-têtes par requête).
+     */
+    private WebClient getBinaryClient() {
+        String authHeader = parameterService.getBasicAuthHeader();
+        return webClientBuilder
+                .defaultHeader(HttpHeaders.AUTHORIZATION, authHeader)
+                .build();
+    }
+
     private String buildUrl(String base,
                             String companyId,
                             String endpoint,

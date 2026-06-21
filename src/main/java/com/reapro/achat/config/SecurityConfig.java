@@ -1,5 +1,6 @@
 package com.reapro.achat.config;
 
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -59,6 +60,25 @@ public class SecurityConfig {
 
                         // Toutes les autres routes → protégées
                         .anyRequest().authenticated()
+        );
+
+        // ── Sémantique HTTP correcte (CORRECTIF 403/401) ──
+        // Sans formLogin/httpBasic, l'entry point par défaut de Spring est Http403ForbiddenEntryPoint :
+        // toute requête NON authentifiée (token absent/expiré/invalide → SecurityContext vide) recevait 403.
+        //   - NON authentifié           → 401 Unauthorized (le front tente refresh, sinon logout/login).
+        //   - authentifié SANS le rôle  → 403 Forbidden    (vrai manque de droits, pas de logout).
+        // Pas de détail sensible, aucun token loggé/exposé.
+        http.exceptionHandling(ex -> ex
+                .authenticationEntryPoint((request, response, authException) -> {
+                    response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                    response.setContentType("application/json;charset=UTF-8");
+                    response.getWriter().write("{\"error\":\"UNAUTHORIZED\"}");
+                })
+                .accessDeniedHandler((request, response, accessDeniedException) -> {
+                    response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                    response.setContentType("application/json;charset=UTF-8");
+                    response.getWriter().write("{\"error\":\"FORBIDDEN\"}");
+                })
         );
 
         // Ajouter le filtre JWT avant le filtre Spring Security

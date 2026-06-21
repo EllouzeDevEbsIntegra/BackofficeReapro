@@ -7,6 +7,7 @@ import com.reapro.achat.enums.Role;
 import com.reapro.achat.repositories.primary.AdminRepository;
 import jakarta.mail.MessagingException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -25,8 +26,20 @@ public class AuthService {
     private final JwtUtils jwtUtils;
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
+    /**
+     * Inscription publique : désactivée par défaut (sécurité). À n'activer qu'en dev/contrôlé.
+     * Quand désactivée : aucun compte n'est créé via les endpoints publics.
+     */
+    @Value("${app.auth.registration-enabled:false}")
+    private boolean registrationEnabled;
+
     // 1️⃣ REGISTER (création compte + code envoyé)
     public String register(RegisterRequest request) {
+
+        // Sécurité : pas d'inscription publique libre. Aucun utilisateur créé si désactivée.
+        if (!registrationEnabled) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "L'inscription publique est désactivée.");
+        }
 
         if (adminRepository.existsByEmail(request.getEmail())) {
             return "Cet email est déjà utilisé.";
@@ -50,7 +63,8 @@ public class AuthService {
                 .verificationCode(code)
                 .verificationExpireAt(LocalDateTime.now().plusMinutes(10))
                 .active(false)
-                .role(Role.ROLE_ADMIN)
+                // Sécurité : un endpoint public ne crée JAMAIS un compte privilégié.
+                .role(Role.ROLE_USER)
                 .build();
 
         adminRepository.save(admin);
@@ -71,6 +85,11 @@ public class AuthService {
 
     // 2️⃣ Vérifier le code d’inscription
     public String verifyRegisterCode(VerifyCodeRequest request) {
+
+        // Le flux d'inscription publique est désactivé : on ne valide aucune création de compte.
+        if (!registrationEnabled) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "L'inscription publique est désactivée.");
+        }
 
         Optional<Admin> optAdmin = adminRepository.findByEmail(request.getEmail());
         if (optAdmin.isEmpty()) {
@@ -124,15 +143,17 @@ public class AuthService {
     // 3️⃣ LOGIN
     public TokenResponse login(LoginRequest request) {
 
+        // 401 : identité non vérifiée / session non établie (sémantique auth). Aucun token loggé.
         Admin admin = adminRepository.findByEmail(request.getEmail())
-                .orElseThrow(() -> new RuntimeException("Identifiants invalides."));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Identifiants invalides."));
 
+        // Utilisateur désactivé / non activé → login refusé (401), avant toute génération de token.
         if (!admin.isActive()) {
-            throw new RuntimeException("Compte non activé. Vérifiez votre email.");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Compte désactivé.");
         }
 
         if (!passwordEncoder.matches(request.getPassword(), admin.getPassword())) {
-            throw new RuntimeException("Identifiants invalides.");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Identifiants invalides.");
         }
 
         String accessToken = jwtUtils.generateAccessToken(admin.getEmail());
@@ -146,12 +167,18 @@ public class AuthService {
 
         String email = jwtUtils.extractEmailFromRefreshToken(refreshToken);
 
+        // 401 : refresh token absent / invalide / expiré → la session ne peut pas être prolongée.
         if (email == null) {
-            throw new RuntimeException("Refresh token invalide ou expiré.");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Refresh token invalide ou expiré.");
         }
 
         Admin admin = adminRepository.findByEmail(email)
-                .orElseThrow(() -> new RuntimeException("Utilisateur introuvable."));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Refresh token invalide ou expiré."));
+
+        // Utilisateur désactivé → impossible de rafraîchir un token (401).
+        if (!admin.isActive()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Compte désactivé.");
+        }
 
         String newAccessToken = jwtUtils.generateAccessToken(admin.getEmail());
         String newRefreshToken = jwtUtils.generateRefreshToken(admin.getEmail());

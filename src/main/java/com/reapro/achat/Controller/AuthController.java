@@ -2,6 +2,7 @@ package com.reapro.achat.Controller;
 
 import com.reapro.achat.DTO.*;
 import com.reapro.achat.services.AuthService;
+import com.reapro.achat.services.PermissionService;
 import jakarta.mail.MessagingException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
@@ -16,19 +17,22 @@ import java.util.List;
 public class AuthController {
 
     private final AuthService authService;
+    private final PermissionService permissionService;
 
     /**
-     * Validation de session (léger). Route protégée :
-     *  - 200 si authentifié (token valide) → renvoie email + rôles ;
+     * Validation de session. Route protégée :
+     *  - 200 si authentifié (token valide) → renvoie email + rôles + permissions effectives ;
      *  - 401 si non authentifié (géré par l'authenticationEntryPoint).
      * Aucun rôle métier requis → utilisable par le frontend pour distinguer 403 droits vs session invalide.
      */
     @GetMapping("/me")
     public SessionInfoResponse me(Authentication authentication) {
+        String email = String.valueOf(authentication.getName());
         List<String> roles = authentication.getAuthorities().stream()
                 .map(GrantedAuthority::getAuthority)
                 .toList();
-        return new SessionInfoResponse(true, String.valueOf(authentication.getName()), roles);
+        ResolvedPermissions resolved = permissionService.resolveForEmail(email);
+        return new SessionInfoResponse(true, email, roles, resolved.superAdmin(), resolved.permissions());
     }
 
     @PostMapping("/register")

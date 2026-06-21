@@ -1,5 +1,7 @@
 package com.reapro.achat.config;
 
+import com.reapro.achat.entities.primary.Admin;
+import com.reapro.achat.enums.Role;
 import com.reapro.achat.repositories.primary.AdminRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -16,9 +18,10 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * Régression 403 Sync Adaptable : le filtre JWT doit s'exécuter aussi sur le dispatch ASYNC
- * (endpoints renvoyant {@code Mono}/{@code Flux}), sinon le SecurityContext n'est pas repeuplé
- * et {@code .authenticated()} refuse (403) alors que le token est valide.
+ * Tests du filtre JWT :
+ *  - régression 403 Sync Adaptable : le filtre doit s'exécuter sur le dispatch ASYNC ({@code Mono}/{@code Flux}) ;
+ *  - RBAC Lot 1 (SEC) : un token valide d'un utilisateur <b>désactivé</b> ne doit PAS peupler le SecurityContext
+ *    (→ 401 via l'authenticationEntryPoint).
  */
 class JwtFilterTest {
 
@@ -31,6 +34,16 @@ class JwtFilterTest {
         SecurityContextHolder.clearContext();
     }
 
+    private Admin admin(boolean active, Role role) {
+        return Admin.builder()
+                .id(1L)
+                .email("u@x.com")
+                .password("x")
+                .active(active)
+                .role(role)
+                .build();
+    }
+
     @Test
     void filterRunsOnAsyncDispatch_regressionGuard() {
         // C'EST le correctif : sans ça, le filtre est sauté sur le dispatch async -> 403 sur les Mono.
@@ -38,10 +51,9 @@ class JwtFilterTest {
     }
 
     @Test
-    void validBearer_populatesSecurityContext() throws Exception {
+    void validBearer_activeUser_populatesSecurityContext() throws Exception {
         when(jwtUtils.extractEmailFromAccessToken("tok")).thenReturn("u@x.com");
-        when(adminRepository.existsByEmail("u@x.com")).thenReturn(true);
-        when(adminRepository.findByEmail("u@x.com")).thenReturn(Optional.empty()); // -> ROLE_ADMIN par défaut
+        when(adminRepository.findByEmail("u@x.com")).thenReturn(Optional.of(admin(true, Role.ROLE_ADMIN)));
 
         MockHttpServletRequest req = new MockHttpServletRequest("GET", "/api/v1/sync-adaptable");
         req.addHeader("Authorization", "Bearer tok");
@@ -52,6 +64,33 @@ class JwtFilterTest {
         assertThat(auth).isNotNull();
         assertThat(auth.getName()).isEqualTo("u@x.com");
         assertThat(auth.getAuthorities().toString()).contains("ROLE_ADMIN");
+    }
+
+    @Test
+    void validBearer_inactiveUser_leavesContextEmpty() throws Exception {
+        // SÉCURITÉ : compte désactivé → même avec un token valide, aucune authentification n'est posée.
+        when(jwtUtils.extractEmailFromAccessToken("tok")).thenReturn("u@x.com");
+        when(adminRepository.findByEmail("u@x.com")).thenReturn(Optional.of(admin(false, Role.ROLE_ADMIN)));
+
+        MockHttpServletRequest req = new MockHttpServletRequest("GET", "/api/v1/sync-adaptable");
+        req.addHeader("Authorization", "Bearer tok");
+
+        filter.doFilter(req, new MockHttpServletResponse(), new MockFilterChain());
+
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+    }
+
+    @Test
+    void unknownUser_leavesContextEmpty() throws Exception {
+        when(jwtUtils.extractEmailFromAccessToken("tok")).thenReturn("ghost@x.com");
+        when(adminRepository.findByEmail("ghost@x.com")).thenReturn(Optional.empty());
+
+        MockHttpServletRequest req = new MockHttpServletRequest("GET", "/api/v1/sync-adaptable");
+        req.addHeader("Authorization", "Bearer tok");
+
+        filter.doFilter(req, new MockHttpServletResponse(), new MockFilterChain());
+
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
     }
 
     @Test

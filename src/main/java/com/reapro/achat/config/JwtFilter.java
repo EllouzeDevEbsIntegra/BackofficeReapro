@@ -49,21 +49,23 @@ public class JwtFilter extends OncePerRequestFilter {
             String email = jwtUtils.extractEmailFromAccessToken(token);
 
             if (email != null && SecurityContextHolder.getContext().getAuthentication() == null) {
-                if (adminRepository.existsByEmail(email)) {
+                // SÉCURITÉ : un token techniquement valide ne suffit pas. L'utilisateur doit toujours
+                // exister ET être actif. Un compte désactivé (ou supprimé) ne peut donc plus utiliser
+                // un JWT encore valide → contexte laissé vide → 401 via l'authenticationEntryPoint.
+                adminRepository.findByEmail(email)
+                        .filter(admin -> admin.isActive())
+                        .ifPresent(admin -> {
+                            // Rôle depuis la base (enum → String). Défaut prudent : ROLE_USER si absent.
+                            String roleName = admin.getRole() != null ? admin.getRole().name() : "ROLE_USER";
 
-                    // Récupère le rôle depuis la base (enum → on convertit en String avec .name())
-                    String roleName = adminRepository.findByEmail(email)
-                            .map(admin -> admin.getRole().name())  // ← .name() pour enum → String
-                            .orElse("ROLE_ADMIN");
-
-                    var auth = new UsernamePasswordAuthenticationToken(
-                            email,
-                            null,
-                            java.util.List.of(new SimpleGrantedAuthority(roleName))
-                    );
-                    auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                    SecurityContextHolder.getContext().setAuthentication(auth);
-                }
+                            var auth = new UsernamePasswordAuthenticationToken(
+                                    email,
+                                    null,
+                                    java.util.List.of(new SimpleGrantedAuthority(roleName))
+                            );
+                            auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                            SecurityContextHolder.getContext().setAuthentication(auth);
+                        });
             }
         }
 

@@ -49,7 +49,10 @@ public class Permission {
     @Column(nullable = false)
     private boolean active = true;
 
+    @Column(name = "created_at")
     private LocalDateTime createdAt;
+
+    @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
     @PrePersist

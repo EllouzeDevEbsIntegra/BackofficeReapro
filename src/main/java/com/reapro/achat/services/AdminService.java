@@ -1,7 +1,6 @@
 package com.reapro.achat.services;
 
 import com.reapro.achat.DTO.*;
-import com.reapro.achat.DTO.bc.BcCompanyBC;
 import com.reapro.achat.entities.primary.Admin;
 import com.reapro.achat.repositories.primary.AdminRepository;
 import lombok.RequiredArgsConstructor;
@@ -19,7 +18,6 @@ import org.springframework.web.server.ResponseStatusException;
 public class AdminService {
 
     private final AdminRepository adminRepository;
-    private final BcCompanyService bcCompanyService;
 
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
@@ -66,38 +64,9 @@ public class AdminService {
         return "Profil mis à jour avec succès.";
     }
 
-    // 2bis) Mettre à jour la société BC du profil (validation via BC /companies)
-    public AdminProfileResponse updateMyCompany(String email, UpdateMyCompanyRequest request) {
-        Admin admin = getAdminByEmail(email);
-
-        if (request == null || request.getBcCompanyId() == null || request.getBcCompanyId().isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "bcCompanyId est obligatoire.");
-        }
-
-        String companyId = request.getBcCompanyId().trim();
-
-        // Charger les sociétés depuis BC et valider l'id
-        BcCompanyBC company = bcCompanyService.getCompanies().stream()
-                .filter(c -> c.getId() != null && c.getId().equalsIgnoreCase(companyId))
-                .findFirst()
-                .orElseThrow(() -> new ResponseStatusException(
-                        HttpStatus.BAD_REQUEST,
-                        "Société BC introuvable: " + companyId
-                ));
-
-        admin.setBcCompanyId(company.getId());
-
-        // displayName si dispo, sinon name
-        String companyName = (company.getDisplayName() != null && !company.getDisplayName().isBlank())
-                ? company.getDisplayName().trim()
-                : (company.getName() != null ? company.getName().trim() : null);
-
-        admin.setBcCompanyName(companyName);
-
-        adminRepository.save(admin);
-
-        return getMyProfile(email);
-    }
+    // 2bis) ⛔ Affectation société RETIRÉE du profil personnel (RBAC) :
+    //       l'utilisateur ne peut plus choisir/modifier sa société. Cette opération est
+    //       désormais réservée au SUPER ADMIN via UserAdminService.setUserCompany().
 
     // 3) Changer mot de passe
     public String changeMyPassword(String email, ChangeMyPasswordRequest request) {

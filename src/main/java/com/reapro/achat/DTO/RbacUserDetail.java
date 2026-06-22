@@ -15,6 +15,8 @@ public record RbacUserDetail(
         String role,
         boolean active,
         boolean superAdmin,
+        String bcCompanyId,
+        String bcCompanyName,
         List<String> permissions,
         LocalDateTime createdAt,
         LocalDateTime updatedAt

@@ -1,6 +1,7 @@
 package com.reapro.achat.services;
 
 import com.reapro.achat.DTO.*;
+import com.reapro.achat.DTO.bc.BcCompanyBC;
 import com.reapro.achat.entities.primary.Admin;
 import com.reapro.achat.entities.primary.Permission;
 import com.reapro.achat.entities.primary.UserPermission;
@@ -49,6 +50,7 @@ public class UserAdminService {
     private final PermissionRepository permissionRepository;
     private final UserPermissionRepository userPermissionRepository;
     private final EmailService emailService;
+    private final BcCompanyService bcCompanyService;
 
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
     private final SecureRandom secureRandom = new SecureRandom();
@@ -273,6 +275,41 @@ public class UserAdminService {
         return new MessageResponse("Utilisateur mis à jour.");
     }
 
+    // ============================ Affectation société (SUPER ADMIN uniquement) ============================
+
+    /**
+     * Affecte / modifie la société BC d'un utilisateur. <b>Action sensible : super-admin uniquement.</b>
+     * Un {@code USER_MANAGEMENT_ACCESS} ou {@code PERMISSION_ASSIGNMENT_ACCESS} non super-admin → 403.
+     * La société est validée contre la liste BC (source de vérité) avant affectation.
+     */
+    public RbacUserDetail setUserCompany(String actorEmail, Long id, String bcCompanyId) {
+        Actor actor = actor(actorEmail);
+        if (!actor.superAdmin()) {
+            throw forbidden("Seul un super-administrateur peut affecter la société d'un utilisateur.");
+        }
+        if (isBlank(bcCompanyId)) {
+            throw badRequest("bcCompanyId est obligatoire.");
+        }
+        Admin target = findUser(id);
+
+        String companyId = bcCompanyId.trim();
+        BcCompanyBC company = bcCompanyService.getCompanies().stream()
+                .filter(c -> c.getId() != null && c.getId().equalsIgnoreCase(companyId))
+                .findFirst()
+                .orElseThrow(() -> badRequest("Société BC introuvable : " + companyId));
+
+        String companyName = (company.getDisplayName() != null && !company.getDisplayName().isBlank())
+                ? company.getDisplayName().trim()
+                : (company.getName() != null ? company.getName().trim() : null);
+
+        target.setBcCompanyId(company.getId());
+        target.setBcCompanyName(companyName);
+        adminRepository.save(target);
+
+        log.info("[RBAC] actor={} set company={} on user id={}", actorEmail, company.getId(), id);
+        return toDetail(target);
+    }
+
     // ============================ Attribution des permissions ============================
 
     public RbacUserDetail assignPermissions(String actorEmail, Long id, List<String> codes) {
@@ -359,12 +396,14 @@ public class UserAdminService {
 
     private RbacUserSummary toSummary(Admin a) {
         return new RbacUserSummary(a.getId(), a.getFirstname(), a.getLastname(), a.getEmail(),
-                a.getRole() != null ? a.getRole().name() : null, a.isActive(), isSuper(a), a.getCreatedAt());
+                a.getRole() != null ? a.getRole().name() : null, a.isActive(), isSuper(a),
+                a.getBcCompanyId(), a.getBcCompanyName(), a.getCreatedAt());
     }
 
     private RbacUserDetail toDetail(Admin a) {
         return new RbacUserDetail(a.getId(), a.getFirstname(), a.getLastname(), a.getEmail(),
                 a.getRole() != null ? a.getRole().name() : null, a.isActive(), isSuper(a),
+                a.getBcCompanyId(), a.getBcCompanyName(),
                 effectivePermissionCodes(a), a.getCreatedAt(), a.getUpdatedAt());
     }
 

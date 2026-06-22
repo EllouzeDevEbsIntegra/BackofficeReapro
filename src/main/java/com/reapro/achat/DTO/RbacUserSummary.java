@@ -14,5 +14,7 @@ public record RbacUserSummary(
         String role,
         boolean active,
         boolean superAdmin,
+        String bcCompanyId,
+        String bcCompanyName,
         LocalDateTime createdAt
 ) {}

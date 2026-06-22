@@ -7,6 +7,7 @@ import com.reapro.achat.entities.primary.Permission;
 import com.reapro.achat.entities.primary.UserPermission;
 import com.reapro.achat.enums.PermissionType;
 import com.reapro.achat.enums.Role;
+import com.reapro.achat.DTO.bc.BcCompanyBC;
 import com.reapro.achat.repositories.primary.AdminRepository;
 import com.reapro.achat.repositories.primary.PermissionRepository;
 import com.reapro.achat.repositories.primary.UserPermissionRepository;
@@ -38,6 +39,7 @@ class UserAdminServiceTest {
     private PermissionRepository permissionRepository;
     private UserPermissionRepository userPermissionRepository;
     private EmailService emailService;
+    private com.reapro.achat.services.BcCompanyService bcCompanyService;
     private UserAdminService service;
 
     private static final String SUPER = "super@x.com";
@@ -51,7 +53,25 @@ class UserAdminServiceTest {
         permissionRepository = mock(PermissionRepository.class);
         userPermissionRepository = mock(UserPermissionRepository.class);
         emailService = mock(EmailService.class);
-        service = new UserAdminService(adminRepository, permissionRepository, userPermissionRepository, emailService);
+        bcCompanyService = mock(com.reapro.achat.services.BcCompanyService.class);
+        service = new UserAdminService(adminRepository, permissionRepository, userPermissionRepository, emailService, bcCompanyService);
+    }
+
+    /** Configure un acteur "gestionnaire utilisateurs" : ROLE_USER possédant USER_MANAGEMENT_ACCESS (non super). */
+    private void wireUserManager(String email, long id) {
+        Admin um = admin(id, email, Role.ROLE_USER, true);
+        when(adminRepository.findByEmail(email)).thenReturn(Optional.of(um));
+        when(userPermissionRepository.findByUserId(id))
+                .thenReturn(List.of(UserPermission.builder().userId(id).permissionId(200L).build()));
+        when(permissionRepository.findById(200L))
+                .thenReturn(Optional.of(perm(200L, "USER_MANAGEMENT_ACCESS", true, PermissionType.ADMIN)));
+    }
+
+    private BcCompanyBC company(String id, String displayName) {
+        BcCompanyBC c = new BcCompanyBC();
+        c.setId(id);
+        c.setDisplayName(displayName);
+        return c;
     }
 
     private Admin admin(Long id, String email, Role role, boolean active) {
@@ -187,6 +207,45 @@ class UserAdminServiceTest {
 
         assertThat(ex).isNotNull();
         assertThat(ex.getStatusCode().value()).isEqualTo(HttpStatus.BAD_REQUEST.value());
+    }
+
+    // ── société : SEUL le super-admin peut affecter la société d'un utilisateur ──
+    @Test
+    void superAdmin_canSetUserCompany() {
+        when(adminRepository.findByEmail(SUPER)).thenReturn(Optional.of(admin(1L, SUPER, Role.ROLE_ADMIN, true)));
+        when(adminRepository.findById(2L)).thenReturn(Optional.of(admin(2L, "u@x.com", Role.ROLE_USER, true)));
+        when(bcCompanyService.getCompanies()).thenReturn(List.of(company("C1", "Société 1")));
+
+        service.setUserCompany(SUPER, 2L, "C1");
+
+        ArgumentCaptor<Admin> captor = ArgumentCaptor.forClass(Admin.class);
+        verify(adminRepository).save(captor.capture());
+        assertThat(captor.getValue().getBcCompanyId()).isEqualTo("C1");
+        assertThat(captor.getValue().getBcCompanyName()).isEqualTo("Société 1");
+    }
+
+    @Test
+    void userManager_nonSuper_cannotSetCompany_403() {
+        wireUserManager("um@x.com", 11L);
+
+        ResponseStatusException ex = catchThrowableOfType(
+                () -> service.setUserCompany("um@x.com", 2L, "C1"), ResponseStatusException.class);
+
+        assertThat(ex).isNotNull();
+        assertThat(ex.getStatusCode().value()).isEqualTo(HttpStatus.FORBIDDEN.value());
+        verify(adminRepository, never()).save(any());
+    }
+
+    @Test
+    void permissionManager_cannotSetCompany_403() {
+        wirePermissionManager();
+
+        ResponseStatusException ex = catchThrowableOfType(
+                () -> service.setUserCompany(PM, 2L, "C1"), ResponseStatusException.class);
+
+        assertThat(ex).isNotNull();
+        assertThat(ex.getStatusCode().value()).isEqualTo(HttpStatus.FORBIDDEN.value());
+        verify(adminRepository, never()).save(any());
     }
 
     // ── anti-lock : impossible de retirer ses propres permissions critiques ──

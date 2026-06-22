@@ -83,13 +83,10 @@ public class AdminController {
         return adminService.toggleAdminActive(id);
     }
 
-    @PutMapping("/me/company")
-    public AdminProfileResponse updateMyCompany(
-            @AuthenticationPrincipal String email,
-            @RequestBody UpdateMyCompanyRequest request
-    ) {
-        return adminService.updateMyCompany(email, request);
-    }
+    // ⛔ RBAC : la société d'un utilisateur n'est PLUS modifiable par l'utilisateur lui-même.
+    // L'affectation société est désormais réservée au SUPER ADMIN via
+    // PATCH /api/admin/users/{id}/company (UserAdminController). La société reste visible
+    // en lecture seule dans le profil (GET /api/admins/me).
 
     // ✅ NOUVEL ENDPOINT TEMPORAIRE POUR METTRE À JOUR UN PARAMÈTRE
     @PreAuthorize("hasAuthority('ROLE_ADMIN')")

@@ -82,6 +82,14 @@ public class UserAdminController {
         return userAdminService.updateUserInfo(email, id, req);
     }
 
+    // Affectation société — SUPER ADMIN uniquement (l'autorisation est appliquée côté service).
+    @PatchMapping("/users/{id}/company")
+    public RbacUserDetail setUserCompany(@AuthenticationPrincipal String email,
+                                         @PathVariable Long id,
+                                         @RequestBody AssignCompanyRequest req) {
+        return userAdminService.setUserCompany(email, id, req != null ? req.bcCompanyId() : null);
+    }
+
     // ── Attribution des permissions (super-admin / PERMISSION_ASSIGNMENT_ACCESS) ─
 
     @PostMapping("/users/{id}/permissions")

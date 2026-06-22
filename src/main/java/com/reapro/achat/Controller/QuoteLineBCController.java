@@ -4,6 +4,7 @@ import com.reapro.achat.DTO.bc.QuoteLineBC;
 import com.reapro.achat.DTO.bc.QuoteLineUpdateRequest;
 import com.reapro.achat.entities.primary.Admin;
 import com.reapro.achat.repositories.primary.AdminRepository;
+import com.reapro.achat.services.CompanyScopeService;
 import com.reapro.achat.services.QuoteLineBCService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -27,16 +28,18 @@ public class QuoteLineBCController {
 
     private final QuoteLineBCService service;
     private final AdminRepository adminRepository;
+    private final CompanyScopeService companyScopeService;
 
     /**
      * GET : liste des lignes de devis filtrées par CompareQuoteNo + ReferenceMaster
      */
     @GetMapping
     public List<QuoteLineBC> getQuoteLines(
+            @AuthenticationPrincipal String email,
             @RequestParam String compareQuoteNo,
-            @RequestParam String referenceMaster,
-            @RequestParam(defaultValue = "20C5337E-2E49-EC11-A103-00155DB6A301") String companyId
+            @RequestParam String referenceMaster
     ) {
+        String companyId = companyScopeService.requireUserCompanyId(email);
         return service.getQuoteLines(companyId, compareQuoteNo, referenceMaster);
     }
 
@@ -47,6 +50,7 @@ public class QuoteLineBCController {
      */
     @GetMapping("/by-compare-quote")
     public QuoteLineBCService.PagedQuoteLines getQuoteLinesByCompareQuote(
+            @AuthenticationPrincipal String email,
             @RequestParam String compareQuoteNo,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
@@ -59,9 +63,9 @@ public class QuoteLineBCController {
             @RequestParam(required = false) String qtyFirstConfirmationOperator,
             @RequestParam(required = false) BigDecimal qtyFirstConfirmationValue,
             @RequestParam(required = false) String referenceOperator,
-            @RequestParam(required = false) String referenceValue,
-            @RequestParam(defaultValue = "20C5337E-2E49-EC11-A103-00155DB6A301") String companyId
+            @RequestParam(required = false) String referenceValue
     ) {
+        String companyId = companyScopeService.requireUserCompanyId(email);
         // Réponse paginée { content, totalElements, totalPages, page, size }
         return service.getQuoteLinesByCompareQuote(
                 companyId, compareQuoteNo, page, size,
@@ -79,10 +83,11 @@ public class QuoteLineBCController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @PreAuthorize("hasAnyAuthority('PURCHASE_CONFIRMATION_ACTIONS','COMPARATOR_CART_ACTIONS')")
     public void updateQuoteLine(
+            @AuthenticationPrincipal String email,
             @PathVariable String id,
-            @RequestParam(defaultValue = "20C5337E-2E49-EC11-A103-00155DB6A301") String companyId,
             @RequestBody QuoteLineUpdateRequest request
     ) {
+        String companyId = companyScopeService.requireUserCompanyId(email);
         service.updateQuoteLine(companyId, id, request);
     }
 

@@ -8,6 +8,7 @@ import com.reapro.achat.entities.primary.SalesOrder;
 import com.reapro.achat.entities.primary.SalesOrderLine;
 import com.reapro.achat.entities.sqlserver.ElvaItem;
 import com.reapro.achat.enums.OrderStatus;
+import com.reapro.achat.enums.Role;
 import com.reapro.achat.exceptions.ApiException;
 import com.reapro.achat.exceptions.ErrorCode;
 import com.reapro.achat.exceptions.StockValidationException;
@@ -216,7 +217,19 @@ public class SalesOrderService {
     public SalesOrderResponse getOrderById(String email, Long orderId) {
         SalesOrder order = salesOrderRepository.findById(orderId)
                 .orElseThrow(() -> new ApiException(ErrorCode.ORDER_NOT_FOUND));
-        
+
+        // SÉCURITÉ (Lot 4bis-A — IDOR) : seul le propriétaire (ou un super-admin pour le support)
+        // peut lire la commande. On renvoie ORDER_NOT_FOUND (comme getDraftOrder) pour ne pas révéler
+        // l'existence d'une commande appartenant à un autre utilisateur.
+        Admin actor = getAdminByEmail(email);
+        boolean isOwner = order.getCreatedBy() != null
+                && order.getCreatedBy().getEmail() != null
+                && order.getCreatedBy().getEmail().equals(email);
+        boolean isSuperAdmin = actor.getRole() == Role.ROLE_ADMIN;
+        if (!isOwner && !isSuperAdmin) {
+            throw new ApiException(ErrorCode.ORDER_NOT_FOUND, "Accès refusé à cette commande.");
+        }
+
         if (order.getStatus() == OrderStatus.VALIDATED && order.getBusinessCentralOrderNumber() != null) {
             try {
                 syncSingleOrder(order);

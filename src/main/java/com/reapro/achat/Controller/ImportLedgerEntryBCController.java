@@ -1,8 +1,10 @@
 package com.reapro.achat.Controller;
 
 import com.reapro.achat.DTO.ImportLedgerLinePageResponse;
+import com.reapro.achat.services.CompanyScopeService;
 import com.reapro.achat.services.ItemLedgerEntryBCService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -18,22 +20,25 @@ import org.springframework.web.bind.annotation.*;
  *
  * Paramètres métier obligatoires : itemNo + sourceNo. page/size optionnels (pagination).
  */
+// RBAC Lot 4bis-A : société = celle de l'utilisateur authentifié ; companyId client supprimé (anti-spoofing).
 @RestController
 @RequestMapping("/api/bc/import-ledger-entries")
 @RequiredArgsConstructor
 public class ImportLedgerEntryBCController {
 
     private final ItemLedgerEntryBCService service;
+    private final CompanyScopeService companyScopeService;
 
     @GetMapping
     public ImportLedgerLinePageResponse getImportLedgerLines(
+            @AuthenticationPrincipal String email,
             @RequestParam String itemNo,
             @RequestParam String sourceNo,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size,
-            @RequestParam(defaultValue = "20C5337E-2E49-EC11-A103-00155DB6A301") String companyId,
             @RequestParam(required = false) String sort   // ex: "PostingDate,desc" (colonne whitelistée) ; défaut = PostingDate desc
     ) {
+        String companyId = companyScopeService.requireUserCompanyId(email);
         return service.getImportLedgerLines(companyId, itemNo, sourceNo, page, size, sort);
     }
 }

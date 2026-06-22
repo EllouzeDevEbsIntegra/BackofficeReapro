@@ -7,12 +7,17 @@ import com.reapro.achat.DTO.bc.SiItemCategory;
 import com.reapro.achat.DTO.bc.BcManufacturer;
 import com.reapro.achat.services.BcManufacturerService;
 import com.reapro.achat.services.BcItemBCService;
+import com.reapro.achat.services.CompanyScopeService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
 import java.util.List;
 
+// RBAC Lot 4bis-A : société strictement celle de l'utilisateur authentifié.
+// Le paramètre client `companyId` (anciennement @RequestParam, GUID par défaut) est SUPPRIMÉ → plus de
+// company-spoofing. La société est résolue depuis le profil (CompanyScopeService) ; absente → 403.
 @RestController
 @RequestMapping("/api/bc")
 @RequiredArgsConstructor
@@ -20,14 +25,15 @@ public class BcItemBCController {
 
     private final BcItemBCService service;
     private final BcManufacturerService manufacturerService;
+    private final CompanyScopeService companyScopeService;
 
     @GetMapping("/itemsEqv")
     public PagedResponse<BcItemEnrichedResponse> getItems(
+            @AuthenticationPrincipal String email,
             @RequestParam String referenceMaster,
             @RequestParam String no,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
-            @RequestParam(defaultValue = "20C5337E-2E49-EC11-A103-00155DB6A301") String companyId,
             @RequestParam(required = false) String compareQuoteNo,
             @RequestParam(required = false) String stockOperator,
             @RequestParam(required = false) BigDecimal stockValue,
@@ -36,6 +42,7 @@ public class BcItemBCController {
             @RequestParam(required = false) String referenceOperator,
             @RequestParam(required = false) String referenceValue
     ) {
+        String companyId = companyScopeService.requireUserCompanyId(email);
         return service.getItemsByReferenceAndNotNoSortedLocally(companyId, referenceMaster, no, page, size, compareQuoteNo,
                 stockOperator, stockValue, dateDernierAchatOperator, dateDernierAchatValue,
                 referenceOperator, referenceValue);
@@ -43,25 +50,28 @@ public class BcItemBCController {
 
     @PatchMapping("/itemsEqv/{no}/toVerify")
     public BcItemBC updateToVerify(
-            @PathVariable String no,
-            @RequestParam(defaultValue = "20C5337E-2E49-EC11-A103-00155DB6A301") String companyId
+            @AuthenticationPrincipal String email,
+            @PathVariable String no
     ) {
+        String companyId = companyScopeService.requireUserCompanyId(email);
         return service.updateToVerifyByNo(companyId, no);
     }
 
     @GetMapping("/categories")
     public List<SiItemCategory> getItemCategories(
+            @AuthenticationPrincipal String email,
             @RequestParam(required = false) Integer indentation,
-            @RequestParam(required = false) String parentCategory,
-            @RequestParam(defaultValue = "20C5337E-2E49-EC11-A103-00155DB6A301") String companyId
+            @RequestParam(required = false) String parentCategory
     ) {
+        String companyId = companyScopeService.requireUserCompanyId(email);
         return service.getItemCategories(companyId, indentation, parentCategory);
     }
 
     @GetMapping("/manufacturers")
     public List<BcManufacturer> getManufacturers(
-            @RequestParam(defaultValue = "20C5337E-2E49-EC11-A103-00155DB6A301") String companyId
+            @AuthenticationPrincipal String email
     ) {
+        String companyId = companyScopeService.requireUserCompanyId(email);
         return manufacturerService.getManufacturers(companyId);
     }
 }

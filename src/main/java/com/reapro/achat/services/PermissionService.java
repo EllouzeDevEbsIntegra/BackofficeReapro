@@ -46,13 +46,25 @@ public class PermissionService {
         if (admin == null || !admin.isActive()) {
             return ResolvedPermissions.none();
         }
+        return new ResolvedPermissions(isSuperAdmin(admin), effectiveCodes(admin));
+    }
+
+    /**
+     * Codes de permissions effectifs d'un utilisateur (déjà chargé).
+     * Super-admin → toutes les permissions actives ; sinon → permissions actives affectées.
+     * Utilisé par {@code JwtFilter} pour injecter les authorities Spring Security (Lot 4).
+     */
+    @Transactional(readOnly = true)
+    public List<String> effectiveCodes(Admin admin) {
+        if (admin == null || !admin.isActive()) {
+            return List.of();
+        }
 
         if (isSuperAdmin(admin)) {
-            List<String> all = permissionRepository.findByActiveTrue().stream()
+            return permissionRepository.findByActiveTrue().stream()
                     .map(p -> p.getCode())
                     .sorted()
                     .toList();
-            return new ResolvedPermissions(true, all);
         }
 
         Set<Long> permissionIds = userPermissionRepository.findByUserId(admin.getId()).stream()
@@ -60,15 +72,13 @@ public class PermissionService {
                 .collect(Collectors.toSet());
 
         if (permissionIds.isEmpty()) {
-            return ResolvedPermissions.none();
+            return List.of();
         }
 
-        List<String> codes = permissionRepository.findAllById(permissionIds).stream()
+        return permissionRepository.findAllById(permissionIds).stream()
                 .filter(p -> p.isActive())
                 .map(p -> p.getCode())
                 .sorted()
                 .toList();
-
-        return new ResolvedPermissions(false, codes);
     }
 }

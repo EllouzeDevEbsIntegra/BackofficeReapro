@@ -1,6 +1,7 @@
 package com.reapro.achat.config;
 
 import com.reapro.achat.repositories.primary.AdminRepository;
+import com.reapro.achat.services.PermissionService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -15,6 +16,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
 @Component
 @RequiredArgsConstructor
@@ -23,6 +26,7 @@ public class JwtFilter extends OncePerRequestFilter {
 
     private final JwtUtils jwtUtils;
     private final AdminRepository adminRepository;
+    private final PermissionService permissionService;
 
     /**
      * CORRECTIF 403 : les endpoints renvoyant un type réactif ({@code Mono}/{@code Flux}) sont
@@ -58,11 +62,16 @@ public class JwtFilter extends OncePerRequestFilter {
                             // Rôle depuis la base (enum → String). Défaut prudent : ROLE_USER si absent.
                             String roleName = admin.getRole() != null ? admin.getRole().name() : "ROLE_USER";
 
-                            var auth = new UsernamePasswordAuthenticationToken(
-                                    email,
-                                    null,
-                                    java.util.List.of(new SimpleGrantedAuthority(roleName))
-                            );
+                            // RBAC Lot 4 : on injecte aussi les PERMISSIONS effectives comme authorities,
+                            // afin que @PreAuthorize("hasAuthority('B2B_ACCESS')") etc. fonctionne.
+                            // Le super-admin (ROLE_ADMIN) reçoit TOUTES les permissions actives → bypass naturel.
+                            List<SimpleGrantedAuthority> authorities = new ArrayList<>();
+                            authorities.add(new SimpleGrantedAuthority(roleName));
+                            for (String code : permissionService.effectiveCodes(admin)) {
+                                authorities.add(new SimpleGrantedAuthority(code));
+                            }
+
+                            var auth = new UsernamePasswordAuthenticationToken(email, null, authorities);
                             auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                             SecurityContextHolder.getContext().setAuthentication(auth);
                         });

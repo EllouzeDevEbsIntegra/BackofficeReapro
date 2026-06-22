@@ -5,6 +5,7 @@ import com.reapro.achat.DTO.articlemanagement.ArticleExtraResponse;
 import com.reapro.achat.DTO.articlemanagement.ArticleManagementItemResponse;
 import com.reapro.achat.services.ArticleManagementService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -18,9 +19,11 @@ import org.springframework.web.bind.annotation.RestController;
  *  GET /api/articles-management/items                  → liste paginée
  *  GET /api/articles-management/items/{itemNo}/extra   → données lourdes du dialog (dernier achat)
  */
+// RBAC Lot 4 : page Gestion Articles → ARTICLE_MANAGEMENT_ACCESS (super-admin bypass via authorities).
 @RestController
 @RequestMapping("/api/articles-management")
 @RequiredArgsConstructor
+@PreAuthorize("hasAuthority('ARTICLE_MANAGEMENT_ACCESS')")
 public class ArticleManagementController {
 
     private final ArticleManagementService service;

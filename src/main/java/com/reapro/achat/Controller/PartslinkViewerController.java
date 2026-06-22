@@ -32,6 +32,7 @@ public class PartslinkViewerController {
 
     private final PartslinkSessionService partslinkSessionService;
 
+    @PreAuthorize("hasAuthority('PARTSLINK_ACCESS')")
     @PostMapping("/session")
     public ResponseEntity<?> createOrGetSession() {
         try {
@@ -42,6 +43,7 @@ public class PartslinkViewerController {
         }
     }
 
+    @PreAuthorize("hasAuthority('PARTSLINK_ACCESS')")
     @GetMapping("/session/status")
     public ResponseEntity<PartslinkSessionStatusResponse> getSessionStatus() {
         return ResponseEntity.ok(partslinkSessionService.getSessionStatus());

@@ -9,12 +9,15 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+// RBAC Lot 4 : lignes de comparateur — partagées Comparateur / Confirmation Achat (lecture, super-admin bypass).
 @RestController
 @RequestMapping("/api/compare-quotes")
 @RequiredArgsConstructor
+@PreAuthorize("hasAnyAuthority('COMPARATOR_ACCESS','PURCHASE_CONFIRMATION_ACCESS')")
 public class CompareQuoteLineController {
 
     private final CompareQuoteLineService service;

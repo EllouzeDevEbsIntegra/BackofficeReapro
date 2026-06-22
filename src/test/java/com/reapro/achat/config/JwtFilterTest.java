@@ -3,6 +3,7 @@ package com.reapro.achat.config;
 import com.reapro.achat.entities.primary.Admin;
 import com.reapro.achat.enums.Role;
 import com.reapro.achat.repositories.primary.AdminRepository;
+import com.reapro.achat.services.PermissionService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockFilterChain;
@@ -27,7 +28,8 @@ class JwtFilterTest {
 
     private final JwtUtils jwtUtils = mock(JwtUtils.class);
     private final AdminRepository adminRepository = mock(AdminRepository.class);
-    private final JwtFilter filter = new JwtFilter(jwtUtils, adminRepository);
+    private final PermissionService permissionService = mock(PermissionService.class);
+    private final JwtFilter filter = new JwtFilter(jwtUtils, adminRepository, permissionService);
 
     @AfterEach
     void clear() {
@@ -51,9 +53,12 @@ class JwtFilterTest {
     }
 
     @Test
-    void validBearer_activeUser_populatesSecurityContext() throws Exception {
+    void validBearer_activeUser_populatesRoleAndPermissionAuthorities() throws Exception {
         when(jwtUtils.extractEmailFromAccessToken("tok")).thenReturn("u@x.com");
-        when(adminRepository.findByEmail("u@x.com")).thenReturn(Optional.of(admin(true, Role.ROLE_ADMIN)));
+        Admin a = admin(true, Role.ROLE_USER);
+        when(adminRepository.findByEmail("u@x.com")).thenReturn(Optional.of(a));
+        // RBAC Lot 4 : les permissions effectives sont injectées comme authorities.
+        when(permissionService.effectiveCodes(a)).thenReturn(java.util.List.of("B2B_ACCESS", "COMPARATOR_ACCESS"));
 
         MockHttpServletRequest req = new MockHttpServletRequest("GET", "/api/v1/sync-adaptable");
         req.addHeader("Authorization", "Bearer tok");
@@ -63,7 +68,10 @@ class JwtFilterTest {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         assertThat(auth).isNotNull();
         assertThat(auth.getName()).isEqualTo("u@x.com");
-        assertThat(auth.getAuthorities().toString()).contains("ROLE_ADMIN");
+        String authorities = auth.getAuthorities().toString();
+        assertThat(authorities).contains("ROLE_USER");
+        assertThat(authorities).contains("B2B_ACCESS");
+        assertThat(authorities).contains("COMPARATOR_ACCESS");
     }
 
     @Test

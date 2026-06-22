@@ -8,6 +8,7 @@ import jakarta.validation.constraints.NotBlank;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -53,7 +54,10 @@ public class ElvaItemController {
         return elvaItemService.getKitItems(no, clientId);
     }
 
+    // RBAC Lot 4 : déclenchement de synchronisation = action lourde → ADAPTABLE_SYNC_RUN.
+    // (Les endpoints de lecture ci-dessus restent transversaux — voir note Lot 4 : non bloqués ce round.)
     @PostMapping("/sync")
+    @PreAuthorize("hasAuthority('ADAPTABLE_SYNC_RUN')")
     public String syncElvaItems() {
         elvaItemService.syncElvaItemsFromSqlServer();
         return "Sync completed successfully";

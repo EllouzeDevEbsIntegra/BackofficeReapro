@@ -3,6 +3,7 @@ package com.reapro.achat.Controller;
 import com.reapro.achat.services.ReportErpSyncService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
@@ -20,6 +21,7 @@ public class ReportErpSyncController {
     }
 
     @GetMapping
+    @PreAuthorize("hasAuthority('ADAPTABLE_SYNC_ACCESS')")
     public Mono<ResponseEntity<String>> getSyncData(
             @AuthenticationPrincipal String email,
             @RequestParam(defaultValue = "1") int page,
@@ -36,6 +38,7 @@ public class ReportErpSyncController {
     }
 
     @PostMapping("/sync")
+    @PreAuthorize("hasAuthority('ADAPTABLE_SYNC_RUN')")
     public ResponseEntity<Map<String, String>> triggerSync() {
         if (reportErpSyncService.isSyncing()) {
             return ResponseEntity.status(HttpStatus.CONFLICT)
@@ -48,6 +51,7 @@ public class ReportErpSyncController {
     }
 
     @GetMapping("/sync-status")
+    @PreAuthorize("hasAuthority('ADAPTABLE_SYNC_ACCESS')")
     public ResponseEntity<Map<String, Boolean>> getSyncStatus() {
         return ResponseEntity.ok(Map.of("isSyncing", reportErpSyncService.isSyncing()));
     }

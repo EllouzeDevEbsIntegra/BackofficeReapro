@@ -20,9 +20,12 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
+// RBAC Lot 4 : Analyse B2B / Search Opportunities → SEARCH_OPPORTUNITIES_ACCESS au niveau classe.
+// L'endpoint d'administration /admin/renormalize-history conserve son @PreAuthorize ROLE_ADMIN (override méthode).
 @RestController
 @RequestMapping("/api/search-opportunities")
 @RequiredArgsConstructor
+@PreAuthorize("hasAuthority('SEARCH_OPPORTUNITIES_ACCESS')")
 public class SearchOpportunityController {
 
     private final SearchOpportunityService searchOpportunityService;

@@ -7,15 +7,18 @@ import com.reapro.achat.DTO.tecdoc.TecDocVehicleDetail;
 import com.reapro.achat.services.ArticleVerificationService;
 import com.reapro.achat.services.TecDocService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
 
+// RBAC Lot 4 : page Catalogue TecDoc complète → TECDOC_CATALOG_ACCESS (super-admin bypass via authorities).
 @RestController
 @RequestMapping("/api/tecdoc")
 @RequiredArgsConstructor
+@PreAuthorize("hasAuthority('TECDOC_CATALOG_ACCESS')")
 public class TecDocController {
 
     private final TecDocService tecDocService;

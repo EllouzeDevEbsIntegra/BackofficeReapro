@@ -7,11 +7,15 @@ import com.reapro.achat.services.CompareQuoteService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+// RBAC Lot 4 : les comparateurs (liste/détail) sont consommés par le Comparateur ET la Confirmation Achat
+// → lecture autorisée pour l'un OU l'autre module (super-admin bypass via authorities).
 @RestController
 @RequestMapping("/api/compare-quotes")
 @RequiredArgsConstructor
+@PreAuthorize("hasAnyAuthority('COMPARATOR_ACCESS','PURCHASE_CONFIRMATION_ACCESS')")
 public class CompareQuoteController {
 
     private final CompareQuoteService service;

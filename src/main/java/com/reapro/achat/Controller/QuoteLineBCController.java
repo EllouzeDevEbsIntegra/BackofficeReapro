@@ -8,15 +8,21 @@ import com.reapro.achat.services.QuoteLineBCService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
 import java.util.List;
 
+// RBAC Lot 4 : lignes de devis BC, partagées Comparateur / Confirmation Achat.
+//  - lecture (GET) : accès Comparateur OU Confirmation Achat ;
+//  - mise à jour (PATCH = décision/action) : actions Confirmation Achat OU actions panier Comparateur.
+// ⚠️ companyId en @RequestParam (défaut codé) → à valider contre la société utilisateur (lot ultérieur).
 @RestController
 @RequestMapping("/api/bc/quote-lines")
 @RequiredArgsConstructor
+@PreAuthorize("hasAnyAuthority('COMPARATOR_ACCESS','PURCHASE_CONFIRMATION_ACCESS')")
 public class QuoteLineBCController {
 
     private final QuoteLineBCService service;
@@ -71,6 +77,7 @@ public class QuoteLineBCController {
      */
     @PatchMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
+    @PreAuthorize("hasAnyAuthority('PURCHASE_CONFIRMATION_ACTIONS','COMPARATOR_CART_ACTIONS')")
     public void updateQuoteLine(
             @PathVariable String id,
             @RequestParam(defaultValue = "20C5337E-2E49-EC11-A103-00155DB6A301") String companyId,

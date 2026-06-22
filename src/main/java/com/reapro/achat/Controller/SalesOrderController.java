@@ -7,12 +7,15 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+// RBAC Lot 4 : commandes B2B (panier/commande client) → B2B_ACCESS (super-admin bypass via authorities).
 @RestController
 @RequestMapping("/api/orders")
 @RequiredArgsConstructor
+@PreAuthorize("hasAuthority('B2B_ACCESS')")
 public class SalesOrderController {
 
     private final SalesOrderService salesOrderService;

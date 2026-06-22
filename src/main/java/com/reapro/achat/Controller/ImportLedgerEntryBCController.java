@@ -4,6 +4,7 @@ import com.reapro.achat.DTO.ImportLedgerLinePageResponse;
 import com.reapro.achat.services.CompanyScopeService;
 import com.reapro.achat.services.ItemLedgerEntryBCService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
@@ -21,9 +22,11 @@ import org.springframework.web.bind.annotation.*;
  * Paramètres métier obligatoires : itemNo + sourceNo. page/size optionnels (pagination).
  */
 // RBAC Lot 4bis-A : société = celle de l'utilisateur authentifié ; companyId client supprimé (anti-spoofing).
+// RBAC Lot 4bis-B : lignes import (Info Article) → lecture si Info Article OU module consommateur.
 @RestController
 @RequestMapping("/api/bc/import-ledger-entries")
 @RequiredArgsConstructor
+@PreAuthorize("hasAnyAuthority('ARTICLE_INFO_READ','COMPARATOR_ACCESS','PURCHASE_CONFIRMATION_ACCESS','B2B_ACCESS','ARTICLE_MANAGEMENT_ACCESS','TECDOC_CATALOG_ACCESS')")
 public class ImportLedgerEntryBCController {
 
     private final ItemLedgerEntryBCService service;

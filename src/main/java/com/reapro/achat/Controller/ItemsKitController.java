@@ -4,14 +4,17 @@ import com.reapro.achat.DTO.BcItemEnrichedResponse;
 import com.reapro.achat.DTO.PagedResponse;
 import com.reapro.achat.services.ItemsKitService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
 
+// RBAC Lot 4bis-B : kits article (Info Article / Comparateur) → lecture si Info Article OU module consommateur.
 @RestController
 @RequestMapping("/api/itemsKit")
 @RequiredArgsConstructor
+@PreAuthorize("hasAnyAuthority('ARTICLE_INFO_READ','COMPARATOR_ACCESS','PURCHASE_CONFIRMATION_ACCESS','B2B_ACCESS','ARTICLE_MANAGEMENT_ACCESS','TECDOC_CATALOG_ACCESS')")
 public class ItemsKitController {
 
     private final ItemsKitService service;

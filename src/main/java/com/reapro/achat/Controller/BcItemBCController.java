@@ -9,6 +9,7 @@ import com.reapro.achat.services.BcManufacturerService;
 import com.reapro.achat.services.BcItemBCService;
 import com.reapro.achat.services.CompanyScopeService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
@@ -18,9 +19,13 @@ import java.util.List;
 // RBAC Lot 4bis-A : société strictement celle de l'utilisateur authentifié.
 // Le paramètre client `companyId` (anciennement @RequestParam, GUID par défaut) est SUPPRIMÉ → plus de
 // company-spoofing. La société est résolue depuis le profil (CompanyScopeService) ; absente → 403.
+// RBAC Lot 4bis-B : équivalences / catégories / fabricants (Info Article) → lecture si Info Article OU
+// module consommateur. NB : PATCH itemsEqv/{no}/toVerify est une écriture BC encore couverte par cette
+// permission de lecture ; à durcir via ARTICLE_WRITE/BC_WRITE dans un lot ultérieur (voir « risques »).
 @RestController
 @RequestMapping("/api/bc")
 @RequiredArgsConstructor
+@PreAuthorize("hasAnyAuthority('ARTICLE_INFO_READ','COMPARATOR_ACCESS','PURCHASE_CONFIRMATION_ACCESS','B2B_ACCESS','ARTICLE_MANAGEMENT_ACCESS','TECDOC_CATALOG_ACCESS')")
 public class BcItemBCController {
 
     private final BcItemBCService service;

@@ -18,10 +18,14 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
+// RBAC Lot 4bis-B : lectures catalogue Elva (top-1000 / search / équivalences / kits) = données Info Article
+// transversales → lecture si Info Article OU module consommateur. Le POST /sync conserve son @PreAuthorize
+// méthode ADAPTABLE_SYNC_RUN (l'annotation de méthode prime sur celle de classe).
 @RestController
 @RequestMapping("/api/elva-items")
 @RequiredArgsConstructor
 @org.springframework.validation.annotation.Validated
+@PreAuthorize("hasAnyAuthority('ARTICLE_INFO_READ','COMPARATOR_ACCESS','PURCHASE_CONFIRMATION_ACCESS','B2B_ACCESS','ARTICLE_MANAGEMENT_ACCESS','TECDOC_CATALOG_ACCESS')")
 public class ElvaItemController {
 
     private final ElvaItemService elvaItemService;

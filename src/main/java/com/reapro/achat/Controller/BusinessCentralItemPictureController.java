@@ -6,11 +6,14 @@ import com.reapro.achat.DTO.bc.BcPictureContent;
 import com.reapro.achat.exceptions.ApiException;
 import com.reapro.achat.exceptions.ErrorCode;
 import com.reapro.achat.services.BusinessCentralItemPictureService;
+import com.reapro.achat.services.CompanyScopeService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -24,8 +27,11 @@ import java.util.Set;
  *  - PUT    /api/bc/items/{itemNo}/picture → upload multipart (champ "file")
  *  - DELETE /api/bc/items/{itemNo}/picture → suppression
  *
- * Sécurité : routes authentifiées (règle globale {@code /api/bc/**} → {@code .authenticated()},
- * identique aux autres modifications d'article BC ; aucun rôle dédié n'existe aujourd'hui).
+ * Sécurité (RBAC Lot 4bis-B) :
+ *  - société résolue depuis l'utilisateur authentifié (CompanyScopeService) ; le {@code companyId} client
+ *    n'est plus accepté (anti company-spoofing) ;
+ *  - lecture (GET) : permission Info Article OU un module consommateur légitime ;
+ *  - écriture (PUT/DELETE) : permission fine {@code ARTICLE_PHOTO_MANAGE}.
  * Aucune URL interne BC ni en-tête/credential BC n'est renvoyé au client.
  */
 @RestController
@@ -35,18 +41,19 @@ import java.util.Set;
 public class BusinessCentralItemPictureController {
 
     private final BusinessCentralItemPictureService pictureService;
+    private final CompanyScopeService companyScopeService;
 
-    // companyId par défaut : même convention que les autres contrôleurs BC Reapro.
-    private static final String DEFAULT_COMPANY_ID = "20C5337E-2E49-EC11-A103-00155DB6A301";
     private static final long MAX_SIZE = 5L * 1024 * 1024; // 5 Mo
     private static final Set<String> ALLOWED_TYPES = Set.of("image/jpeg", "image/png", "image/webp");
 
     /** GET binaire image, ou 404 si pas de photo. */
     @GetMapping("/{itemNo}/picture")
+    @PreAuthorize("hasAnyAuthority('ARTICLE_INFO_READ','COMPARATOR_ACCESS','PURCHASE_CONFIRMATION_ACCESS','B2B_ACCESS','ARTICLE_MANAGEMENT_ACCESS','TECDOC_CATALOG_ACCESS')")
     public ResponseEntity<byte[]> getPicture(
-            @PathVariable String itemNo,
-            @RequestParam(defaultValue = DEFAULT_COMPANY_ID) String companyId) {
+            @AuthenticationPrincipal String email,
+            @PathVariable String itemNo) {
 
+        String companyId = companyScopeService.requireUserCompanyId(email);
         BcPictureContent pic = pictureService.getPicture(companyId, itemNo);
         if (pic == null) {
             return ResponseEntity.notFound().build();
@@ -66,11 +73,13 @@ public class BusinessCentralItemPictureController {
 
     /** UPDATE/upload : multipart/form-data, champ "file" (jpeg/png/webp, max 5 Mo). */
     @PutMapping(value = "/{itemNo}/picture", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasAuthority('ARTICLE_PHOTO_MANAGE')")
     public PictureUpdateResponse updatePicture(
+            @AuthenticationPrincipal String email,
             @PathVariable String itemNo,
-            @RequestParam("file") MultipartFile file,
-            @RequestParam(defaultValue = DEFAULT_COMPANY_ID) String companyId) {
+            @RequestParam("file") MultipartFile file) {
 
+        String companyId = companyScopeService.requireUserCompanyId(email);
         if (file == null || file.isEmpty()) {
             throw new ApiException(ErrorCode.INVALID_IMAGE_FILE, "Fichier image vide ou manquant");
         }
@@ -100,10 +109,12 @@ public class BusinessCentralItemPictureController {
 
     /** DELETE photo. */
     @DeleteMapping("/{itemNo}/picture")
+    @PreAuthorize("hasAuthority('ARTICLE_PHOTO_MANAGE')")
     public PictureDeleteResponse deletePicture(
-            @PathVariable String itemNo,
-            @RequestParam(defaultValue = DEFAULT_COMPANY_ID) String companyId) {
+            @AuthenticationPrincipal String email,
+            @PathVariable String itemNo) {
 
+        String companyId = companyScopeService.requireUserCompanyId(email);
         pictureService.deletePicture(companyId, itemNo);
         return PictureDeleteResponse.builder()
                 .itemNo(itemNo)

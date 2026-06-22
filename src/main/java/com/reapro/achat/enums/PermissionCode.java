@@ -11,10 +11,10 @@ package com.reapro.achat.enums;
  * ou déclarer ici une nouvelle permission de niveau module/fonctionnalité (cf.
  * Reapro-RBAC-permissions-roadmap.md). Le {@code code} en base = {@link #name()}.</p>
  *
- * <p><b>Permissions futures</b> (documentées, volontairement <i>non</i> déclarées en V1 pour ne pas
- * être semées prématurément ; à activer dans un lot ultérieur quand la fonctionnalité existera) :
- * {@code ARTICLE_PHOTO_MANAGE}, {@code ARTICLE_WRITE}, {@code BC_WRITE}, {@code PARTSLINK_EXPORT},
- * {@code SEARCH_OPPORTUNITIES_ACTIONS}.</p>
+ * <p><b>Permissions futures</b> (documentées, volontairement <i>non</i> déclarées pour ne pas
+ * être semées prématurément ; à activer quand la fonctionnalité existera) :
+ * {@code ARTICLE_WRITE}, {@code BC_WRITE}, {@code PARTSLINK_EXPORT}, {@code SEARCH_OPPORTUNITIES_ACTIONS}.
+ * ({@code ARTICLE_PHOTO_MANAGE} a été déclarée au Lot 4bis-B pour protéger l'upload/suppression de photos.)</p>
  */
 public enum PermissionCode {
 
@@ -55,6 +55,8 @@ public enum PermissionCode {
             "Articles / TecDoc", PermissionType.ACTION, false, true),
     ARTICLE_MANAGEMENT_ACCESS("Accès Gestion Articles", "Accès à la page Gestion Articles",
             "Articles / TecDoc", PermissionType.MODULE, false, true),
+    ARTICLE_PHOTO_MANAGE("Gestion photos article", "Upload / suppression des photos article (écriture BC)",
+            "Articles / TecDoc", PermissionType.ACTION, false, true),
 
     // ── Administration (permissions sensibles — anti-escalade, cf. roadmap §7) ─
     SETTINGS_ACCESS("Ouvrir Paramètres", "Ouverture de la section Paramètres",
